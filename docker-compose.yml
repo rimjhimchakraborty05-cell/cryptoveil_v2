@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  cryptoveil:
+    build: .
+    container_name: cryptoveil_soc
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    environment:
+      - CRYPTOVEIL_HOST=0.0.0.0
+      - CRYPTOVEIL_PORT=8765
+    volumes:
+      - ./data:/app/data
+      - ./offhost_evidence:/app/offhost_evidence

@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "CryptoVeil",
+  "version": "2.0.0",
+  "description": "Real-time browser security: trust scoring, data obfuscation, Shadow AI detection, and endpoint telemetry bridge.",
+  "permissions": [
+    "webNavigation",
+    "webRequest",
+    "storage",
+    "tabs",
+    "scripting",
+    "activeTab",
+    "notifications",
+    "alarms"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_title": "CryptoVeil Security",
+    "default_popup": "popup.html"
+  },
+  "icons": {
+    "16":  "icons/icon16.png",
+    "48":  "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

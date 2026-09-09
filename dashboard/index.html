@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>CryptoVeil v2 — Real-Time Security Operations & Forensic HUD</title>
+  <meta name="description" content="Real-time multi-layer endpoint and browser security operations suite with behavioral anomaly detection, Merkle-tree tamper-evident forensic logging, and 24-hour SOC reports."/>
+  <link rel="stylesheet" href="css/style.css"/>
+  <!-- D3.js v7 for interactive process graph -->
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Top Navigation Header ────────────────────────────────────────── -->
+  <header>
+    <div class="logo">
+      <div class="logo-icon">🛡</div>
+      <div>
+        <h1>CryptoVeil <span class="badge-v2">DESKTOP SOC</span></h1>
+        <span>Real-Time Endpoint &amp; Browser Security Desktop Suite</span>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs" id="nav-tabs">
+      <button class="nav-tab active" data-tab="tab-hud">📊 Live HUD</button>
+      <button class="nav-tab" data-tab="tab-process">🕸 Process &amp; MITRE</button>
+      <button class="nav-tab" data-tab="tab-forensics">🔐 Forensic Tamper Lab</button>
+      <button class="nav-tab" data-tab="tab-simulator">⚡ Attack Simulator</button>
+      <button class="nav-tab" data-tab="tab-reports">📑 24h SOC Reports</button>
+      <button class="nav-tab highlight" data-tab="tab-browser">🌐 Browser &amp; Extension Hub</button>
+      <button class="nav-tab" data-tab="tab-network">📡 Network Threats</button>
+    </nav>
+
+    <div class="header-right">
+      <!-- Desktop Agent Status Pill -->
+      <div class="lan-pill" id="header-lan-pill" title="Desktop Agent Active. Click to copy connection info.">
+        <span class="lan-dot"></span>
+        <span id="header-lan-text">DESKTOP AGENT: ACTIVE</span>
+      </div>
+
+      <!-- Sound toggle button -->
+      <button class="btn-icon" id="btn-sound-toggle" title="Toggle audio alert cues">
+        <span id="sound-icon">🔊</span>
+      </button>
+
+      <!-- Connection pill -->
+      <div class="conn-pill" id="conn-pill">
+        <div class="conn-dot"></div>
+        <span id="conn-label">INITIALIZING…</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Top Stats Bar (Persistent across tabs) ───────────────────────── -->
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="stat-icon cyan">📡</div>
+      <div>
+        <div class="stat-label">Total Events</div>
+        <div class="stat-value" id="ev-total">0</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon red">⚠</div>
+      <div>
+        <div class="stat-label">Threats Detected</div>
+        <div class="stat-value" id="ev-threats">0</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon amber">🔐</div>
+      <div>
+        <div class="stat-label">Merkle Checkpoints</div>
+        <div class="stat-value" id="ev-checkpoints">0</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon purple">⚙</div>
+      <div>
+        <div class="stat-label">Monitored Processes</div>
+        <div class="stat-value" id="ev-processes">0</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon green">🌐</div>
+      <div>
+        <div class="stat-label">Browser Bridge</div>
+        <div class="stat-value" id="ev-browser" style="font-size:0.95rem;">Disconnected</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon cyan">🛡</div>
+      <div>
+        <div class="stat-label">Forensic Chain</div>
+        <div class="stat-value" id="ev-integrity" style="font-size:0.95rem;color:var(--green);">VERIFIED ✓</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TAB 1: Live SOC HUD ─────────────────────────────────────────── -->
+  <main class="tab-content active" id="tab-hud">
+    <!-- Quick Actions Bar -->
+    <div class="quick-bar">
+      <div class="quick-bar-title">⚡ Quick Incident Controls:</div>
+      <button class="btn-action primary" id="btn-quick-sim">🚀 Run Full Simulation</button>
+      <button class="btn-action success" id="btn-quick-verify">🔍 Verify Forensic Chain</button>
+      <button class="btn-action amber" id="btn-quick-tamper">🎯 Simulate Tampering Demo</button>
+      <button class="btn-action cyan" id="btn-quick-report">📑 Generate Daily Report</button>
+      <button class="btn-action purple" id="btn-quick-attach-ext">🌐 Attach Browser Extension</button>
+    </div>
+
+    <div class="main-grid">
+      <!-- Mini Process Hierarchy & Sensors -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">🕸 Live Process Topology &amp; Sensors</div>
+          <span class="panel-badge">Async Event Bus Active</span>
+        </div>
+        <div class="panel-body">
+          <div id="hud-graph-container" style="height: 380px;"></div>
+          <!-- Sensor status strip -->
+          <div class="sensor-strip">
+            <div class="sensor-pill active" id="sens-proc"><span class="dot"></span> Process Watcher</div>
+            <div class="sensor-pill active" id="sens-entropy"><span class="dot"></span> Filesystem Entropy (Burst)</div>
+            <div class="sensor-pill active" id="sens-clip"><span class="dot"></span> Clipboard Intercept</div>
+            <div class="sensor-pill active" id="sens-net"><span class="dot"></span> Network C2 / DGA Engine</div>
+            <div class="sensor-pill active" id="sens-ext"><span class="dot"></span> Chrome MV3 Extension</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Real-Time Event Stream with Filters -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">📋 Real-Time Security Event Stream</div>
+          <div class="stream-controls">
+            <span class="badge-counter" id="stream-count">0 items</span>
+            <button class="btn-tiny" id="btn-clear-stream" title="Clear visual list">Clear</button>
+          </div>
+        </div>
+        <div class="filter-bar">
+          <input type="text" id="stream-search" placeholder="Filter by keyword, PID, IP, topic…" class="input-search"/>
+          <div class="sev-filters">
+            <button class="btn-sev active" data-sev="all">ALL</button>
+            <button class="btn-sev" data-sev="critical">CRIT</button>
+            <button class="btn-sev" data-sev="high">HIGH</button>
+            <button class="btn-sev" data-sev="medium">MED</button>
+            <button class="btn-sev" data-sev="low">LOW</button>
+            <button class="btn-sev" data-sev="info">INFO</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div id="event-stream">
+            <div class="empty-state">
+              <span style="font-size:1.6rem">📡</span>
+              <span>Listening for real-time security events on Async Event Bus…</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ── TAB 2: Process Ancestry & MITRE ATT&CK Matrix ───────────────── -->
+  <main class="tab-content" id="tab-process">
+    <div class="main-grid" style="grid-template-columns: 1fr 340px;">
+      <!-- Interactive D3 Graph with Zoom/Pan -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">🕸 Live Process Ancestry &amp; Lineage Graph</div>
+          <div class="graph-tools">
+            <button class="btn-tiny" id="btn-graph-reset">Reset View</button>
+            <button class="btn-tiny" id="btn-graph-zoom-in">+</button>
+            <button class="btn-tiny" id="btn-graph-zoom-out">−</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div id="process-graph-container" style="height: 520px;"></div>
+        </div>
+      </div>
+
+      <!-- MITRE Technique Matrix & Node Details -->
+      <div style="display:flex;flex-direction:column;gap:1rem;">
+        <!-- Selected Node Inspector -->
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">🔍 Process Node Inspector</div>
+            <span class="panel-badge" id="inspector-badge">Click Node to Inspect</span>
+          </div>
+          <div class="panel-body" style="padding: 1rem;" id="inspector-content">
+            <div class="inspector-empty">Select any process node in the graph to inspect parent lineage, command arguments, and threat correlation.</div>
+          </div>
+        </div>
+
+        <!-- MITRE Technique Matrix -->
+        <div class="panel" style="flex:1;">
+          <div class="panel-header">
+            <div class="panel-title">🎯 MITRE ATT&amp;CK Rule Matrix</div>
+            <span class="panel-badge">DSL Engine Active</span>
+          </div>
+          <div class="panel-body">
+            <div class="mitre-grid" id="mitre-grid">
+              <!-- Populated dynamically via JS -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ── TAB 3: Forensic Tamper Demo & Verification Lab ──────────────── -->
+  <main class="tab-content" id="tab-forensics">
+    <!-- Forensic Pipeline Narrative Banner -->
+    <div class="forensic-banner">
+      <div class="pipeline-step active">
+        <div class="step-num">1</div>
+        <div class="step-title">Security Event</div>
+        <div class="step-desc">Sensors &amp; Engines</div>
+      </div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-step active">
+        <div class="step-num">2</div>
+        <div class="step-title">SHA-256 Hash Chain</div>
+        <div class="step-desc">Sequential Hash Binding</div>
+      </div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-step active">
+        <div class="step-num">3</div>
+        <div class="step-title">Merkle Checkpoints</div>
+        <div class="step-desc">RFC 6962 Batch Trees</div>
+      </div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-step active">
+        <div class="step-num">4</div>
+        <div class="step-title">Ed25519 Signatures</div>
+        <div class="step-desc">Asymmetric Private Key</div>
+      </div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-step active">
+        <div class="step-num">5</div>
+        <div class="step-title">Off-Host Evidence</div>
+        <div class="step-desc">Immutable Remote Mirror</div>
+      </div>
+    </div>
+
+    <!-- Tamper Demonstration Studio -->
+    <div class="tamper-studio">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">🎯 Killer Demonstration: Live Forensic Tamper &amp; Recovery</div>
+          <span class="panel-badge" id="chain-status-badge">Integrity: Intact</span>
+        </div>
+        <div class="panel-body" style="padding: 1.25rem;">
+          <p style="color:var(--text-dim);margin-bottom:1rem;font-size:0.85rem;">
+            Test CryptoVeil's cryptographic integrity guarantees. You can verify the intact chain, simulate unauthorized modification of a historical record, witness cryptographic verification catch the tampering with exact sequence localization, and inspect the untouched off-host replica.
+          </p>
+
+          <div class="tamper-actions-row">
+            <button class="btn-action success" id="btn-verify-chain">
+              <span>🔍</span> 1. Verify Hash Chain
+            </button>
+            <button class="btn-action red" id="btn-simulate-tamper">
+              <span>⚡</span> 2. Simulate Local Tampering
+            </button>
+            <button class="btn-action cyan" id="btn-fetch-offhost">
+              <span>🛡</span> 3. Retrieve Off-Host Clean Copy
+            </button>
+          </div>
+
+          <!-- Chain Verification Status Panel -->
+          <div class="verification-box" id="verification-box" style="display:none;">
+            <div class="verif-header" id="verif-header">
+              <span id="verif-icon">✓</span>
+              <span id="verif-title">CRYPTOGRAPHIC CHAIN VERIFIED</span>
+            </div>
+            <div class="verif-details" id="verif-details"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="main-grid" style="margin-top:1rem;">
+      <!-- Visual Hash Chain Explorer -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">⛓ Visual Cryptographic Hash Chain Explorer</div>
+          <button class="btn-tiny" id="btn-refresh-chain">Refresh Chain</button>
+        </div>
+        <div class="panel-body">
+          <div class="chain-list" id="chain-list">
+            <div class="empty-state">Loading forensic chain…</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RFC 6962 Merkle Inclusion Proof Verifier -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">🔑 RFC 6962 Merkle Inclusion Proof Verifier</div>
+          <span class="panel-badge">Self-Contained Audit</span>
+        </div>
+        <div class="panel-body" style="padding: 1.25rem;">
+          <label style="display:block;font-size:0.75rem;color:var(--text-dim);margin-bottom:0.4rem;">
+            Enter Event Sequence # to extract O(log n) cryptographic inclusion proof:
+          </label>
+          <div class="proof-input-row">
+            <input type="number" id="proof-seq" placeholder="e.g. 1" min="0" value="0"/>
+            <button class="btn-action primary" id="btn-fetch-proof">Generate &amp; Verify Proof</button>
+          </div>
+          <div class="proof-result" id="proof-result" style="display:none;margin-top:1rem;"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ── TAB 4: Interactive Attack & Defense Simulator ───────────────── -->
+  <main class="tab-content" id="tab-simulator">
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">⚡ Interactive Cybersecurity Threat &amp; Anomaly Simulator</div>
+        <button class="btn-action primary" id="btn-run-all-sims">🚀 Execute All Simulations</button>
+      </div>
+      <div class="panel-body" style="padding: 1.25rem;">
+        <p style="color:var(--text-dim);margin-bottom:1.25rem;font-size:0.85rem;">
+          Safely test CryptoVeil's multi-layered detection engines and measure detection latencies in real-time. All triggers are non-destructive and contained.
+        </p>
+
+        <!-- Simulation Cards Grid -->
+        <div class="sim-grid">
+          <!-- Simulation 1 -->
+          <div class="sim-card">
+            <div class="sim-card-header">
+              <span class="sim-icon red">🦠</span>
+              <div class="sim-title">Ransomware Burst</div>
+            </div>
+            <div class="sim-desc">Generates rapid high-entropy file bursts to trigger the watchdog filesystem entropy sensor (&gt;7.5 Shannon entropy).</div>
+            <button class="btn-action red sim-btn" data-sim="sim_ransomware_burst">Trigger Ransomware Burst</button>
+          </div>
+
+          <!-- Simulation 2 -->
+          <div class="sim-card">
+            <div class="sim-card-header">
+              <span class="sim-icon amber">📋</span>
+              <div class="sim-title">Clipboard Hijacker</div>
+            </div>
+            <div class="sim-desc">Simulates a rapid unauthorized clipboard replacement of a cryptocurrency wallet address to test clipboard memory monitoring.</div>
+            <button class="btn-action amber sim-btn" data-sim="sim_clipboard_hijack">Trigger Clipboard Swap</button>
+          </div>
+
+          <!-- Simulation 3 -->
+          <div class="sim-card">
+            <div class="sim-card-header">
+              <span class="sim-icon purple">🛑</span>
+              <div class="sim-title">Anti-Forensic Log Wipe</div>
+            </div>
+            <div class="sim-desc">Executes benign process matching indicator removal commands (<code>wevtutil cl</code>) to test defense evasion alerting.</div>
+            <button class="btn-action purple sim-btn" data-sim="sim_anti_forensic">Trigger Anti-Forensics</button>
+          </div>
+
+          <!-- Simulation 4 -->
+          <div class="sim-card">
+            <div class="sim-card-header">
+              <span class="sim-icon cyan">🎯</span>
+              <div class="sim-title">MITRE Process Hollowing</div>
+            </div>
+            <div class="sim-desc">Simulates process hollowing (T1055.012) where <code>svchost.exe</code> is spawned by an unauthorized parent process.</div>
+            <button class="btn-action cyan sim-btn" data-sim="sim_mitre_hollowing">Trigger Process Hollowing</button>
+          </div>
+
+          <!-- Simulation 5 -->
+          <div class="sim-card">
+            <div class="sim-card-header">
+              <span class="sim-icon red">📡</span>
+              <div class="sim-title">C2 Periodic Beaconing</div>
+            </div>
+            <div class="sim-desc">Simulates highly regular outbound network beacons (Coefficient of Variation &lt; 0.15) to detect Command &amp; Control.</div>
+            <button class="btn-action red sim-btn" data-sim="sim_c2_beacon">Trigger C2 Beacon</button>
+          </div>
+
+          <!-- Simulation 6 -->
+          <div class="sim-card">
+            <div class="sim-card-header">
+              <span class="sim-icon amber">🌐</span>
+              <div class="sim-title">DGA Domain Anomaly</div>
+            </div>
+            <div class="sim-desc">Simulates domain queries with high Shannon character entropy and anomalous vowel-consonant ratios to detect DGA malware.</div>
+            <button class="btn-action amber sim-btn" data-sim="sim_dga_detection">Trigger DGA Query</button>
+          </div>
+
+          <!-- Simulation 7 -->
+          <div class="sim-card">
+            <div class="sim-card-header">
+              <span class="sim-icon green">🛡</span>
+              <div class="sim-title">Browser Typosquat Site</div>
+            </div>
+            <div class="sim-desc">Simulates navigation to a typosquatted domain (e.g. <code>paypa1-secure.top</code>) with low algorithmic trust scoring.</div>
+            <button class="btn-action green sim-btn" data-sim="sim_browser_threat">Trigger Phishing Event</button>
+          </div>
+
+          <!-- Simulation 8 -->
+          <div class="sim-card">
+            <div class="sim-card-header">
+              <span class="sim-icon purple">🤖</span>
+              <div class="sim-title">Shadow AI Exfiltration</div>
+            </div>
+            <div class="sim-desc">Simulates background API queries to unauthorized generative AI endpoints (e.g. <code>api.openai.com</code>) from browser sessions.</div>
+            <button class="btn-action purple sim-btn" data-sim="sim_shadow_ai">Trigger Shadow AI Alert</button>
+          </div>
+        </div>
+
+        <!-- Simulation Output Console -->
+        <div class="sim-console" style="margin-top:1.5rem;">
+          <div class="sim-console-header">
+            <span>💻 Simulation Execution &amp; Latency Benchmark Console</span>
+            <button class="btn-tiny" id="btn-clear-console">Clear Console</button>
+          </div>
+          <div class="sim-console-body" id="sim-console-output">
+            <div class="console-line info">[INIT] Simulation subsystem ready. Click any trigger above to execute.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ── TAB 5: 24-Hour SOC Reports ──────────────────────────────────── -->
+  <main class="tab-content" id="tab-reports">
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">📑 24-Hour Automated SOC Security Reports</div>
+        <div style="display:flex;gap:0.5rem;align-items:center;">
+          <select id="report-date-select" class="input-select"></select>
+          <button class="btn-action cyan" id="btn-generate-report">⚡ Generate Report Now</button>
+        </div>
+      </div>
+      <div class="panel-body" style="padding: 1.25rem;">
+        <!-- Report Header Summary Bar -->
+        <div class="report-overview-header" id="report-overview-header">
+          <div>
+            <h2 id="rep-date-title">Daily SOC Report</h2>
+            <span class="report-meta" id="rep-generated-at">Generated: Loading…</span>
+          </div>
+          <div class="report-downloads">
+            <button class="btn-action primary" id="btn-download-pdf">📄 Download PDF</button>
+            <button class="btn-action success" id="btn-download-csv">📊 Download CSV</button>
+            <button class="btn-action cyan" id="btn-download-json">🔧 Download JSON</button>
+          </div>
+        </div>
+
+        <!-- Executive Summary Cards -->
+        <div class="exec-summary-grid" id="exec-summary-grid">
+          <div class="exec-card">
+            <div class="exec-label">Overall Status</div>
+            <div class="exec-val" id="rep-status" style="color:var(--green);">NORMAL</div>
+          </div>
+          <div class="exec-card">
+            <div class="exec-label">Events Processed</div>
+            <div class="exec-val" id="rep-total-events">0</div>
+          </div>
+          <div class="exec-card">
+            <div class="exec-label">Threats Detected</div>
+            <div class="exec-val" id="rep-threats-detected">0</div>
+          </div>
+          <div class="exec-card">
+            <div class="exec-label">Threats Blocked</div>
+            <div class="exec-val" id="rep-threats-blocked">0</div>
+          </div>
+          <div class="exec-card">
+            <div class="exec-label">Forensic Integrity</div>
+            <div class="exec-val" id="rep-forensic-integrity" style="color:var(--green);">VERIFIED ✓</div>
+          </div>
+        </div>
+
+        <!-- Detailed Report Sections Grid -->
+        <div class="report-sections-grid">
+          <!-- Browser Security -->
+          <div class="report-box">
+            <h3>🌐 Browser Security</h3>
+            <ul class="report-list" id="rep-browser-list">
+              <li>Sites Analyzed: <strong id="rep-b-sites">0</strong></li>
+              <li>Suspicious Sites: <strong id="rep-b-suspicious">0</strong></li>
+              <li>Blocked Phishing Pages: <strong id="rep-b-blocked">0</strong></li>
+              <li>Shadow AI Invocations: <strong id="rep-b-shadowai">0</strong></li>
+              <li>Sensitive Field Masks: <strong id="rep-b-masks">0</strong></li>
+            </ul>
+          </div>
+
+          <!-- Endpoint Security -->
+          <div class="report-box">
+            <h3>🛡 Endpoint Security</h3>
+            <ul class="report-list" id="rep-endpoint-list">
+              <li>Suspicious Processes: <strong id="rep-e-proc">0</strong></li>
+              <li>Clipboard Hijack Attempts: <strong id="rep-e-clip">0</strong></li>
+              <li>Ransomware Burst Anomalies: <strong id="rep-e-burst">0</strong></li>
+              <li>Anti-Forensic Events: <strong id="rep-e-antiforensic">0</strong></li>
+              <li>C2 / DGA Network Anomalies: <strong id="rep-e-net">0</strong></li>
+            </ul>
+          </div>
+
+          <!-- Forensic Evidence Integrity -->
+          <div class="report-box">
+            <h3>🔐 Forensic Evidence Integrity</h3>
+            <ul class="report-list" id="rep-forensic-list">
+              <li>Total Evidence Events: <strong id="rep-f-total">0</strong></li>
+              <li>Hash Chain Verification: <strong id="rep-f-chain" style="color:var(--green);">PASS ✓</strong></li>
+              <li>Merkle Checkpoints Sealed: <strong id="rep-f-checkpoints">0</strong></li>
+              <li>Digital Signatures (Ed25519): <strong id="rep-f-signatures" style="color:var(--green);">VALID ✓</strong></li>
+              <li>Off-Host Evidence Mirror: <strong id="rep-f-offhost" style="color:var(--green);">AVAILABLE ✓</strong></li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- MITRE ATT&CK Detections Table -->
+        <div class="report-table-section">
+          <h3>🎯 MITRE ATT&amp;CK Detections in this Cycle</h3>
+          <div id="rep-mitre-table-container">
+            <div class="empty-state" style="height:60px;">No MITRE threat detections recorded for this period.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ── TAB 6: Browser & Extension Hub ─────────────────────────────── -->
+  <main class="tab-content" id="tab-browser">
+    
+    <!-- Extension Hub Top Overview & Scanner Banner -->
+    <div class="ext-hub-banner">
+      <div class="ext-hub-left">
+        <h2>🌐 Browser Security &amp; Extension Attachment Center</h2>
+        <p>
+          Automatically discovers all installed Chromium browsers (Google Chrome, Microsoft Edge, Brave) and their signed-in email accounts. Launch any browser profile with CryptoVeil protection attached in 1 click or connect manually.
+        </p>
+      </div>
+      <div class="ext-hub-right">
+        <div class="ext-live-status-card">
+          <div class="status-indicator-dot" id="hub-status-dot"></div>
+          <div>
+            <div class="status-title" id="hub-status-title">Extension Bridge Active</div>
+            <div class="status-sub" id="hub-status-sub">Listening for browser telemetry</div>
+          </div>
+        </div>
+        <button class="btn-action cyan" id="btn-refresh-profiles">🔄 Rescan Browser Profiles</button>
+      </div>
+    </div>
+
+    <!-- Multi-Browser & Email Account Auto-Discovery Grid -->
+    <div class="panel" style="margin-top:1.25rem;">
+      <div class="panel-header">
+        <div class="panel-title">👤 Detected Browser Profiles &amp; Associated Email Accounts</div>
+        <span class="panel-badge" id="profiles-count-badge">Scanning host…</span>
+      </div>
+      <div class="panel-body" style="padding: 1.25rem;">
+        <p style="font-size:0.85rem;color:var(--text-dim);margin-bottom:1rem;">
+          CryptoVeil scanned your computer and detected the following browser accounts. Click <strong>"🚀 Launch with Extension"</strong> on any profile to open that browser profile with the security extension automatically loaded!
+        </p>
+
+        <div class="browser-profiles-grid" id="browser-profiles-grid">
+          <div class="empty-state">Scanning local browsers for user profiles and email IDs…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 1-Click Extension Attachment Assistant Guide -->
+    <div class="panel" style="margin-top:1.25rem;">
+      <div class="panel-header">
+        <div class="panel-title">🔌 Manual Extension Attachment Assistant (Chrome / Edge / Brave)</div>
+        <span class="panel-badge">Developer Mode Assistant</span>
+      </div>
+      <div class="panel-body" style="padding: 1.25rem;">
+        <div class="ext-path-card">
+          <div class="ext-path-info">
+            <span class="path-label">CryptoVeil Extension Directory Path:</span>
+            <code id="ext-absolute-path">Loading extension path…</code>
+          </div>
+          <button class="btn-action primary" id="btn-copy-ext-path">📋 Copy Extension Path</button>
+        </div>
+
+        <div class="ext-steps-grid" style="margin-top:1rem;">
+          <div class="ext-step-card">
+            <div class="step-badge">Step 1</div>
+            <h4>Open Extensions Page</h4>
+            <p>In Chrome enter <code>chrome://extensions</code> or in Edge enter <code>edge://extensions</code>.</p>
+          </div>
+          <div class="ext-step-card">
+            <div class="step-badge">Step 2</div>
+            <h4>Enable Developer Mode</h4>
+            <p>Toggle the <strong>Developer mode</strong> switch located in the top-right corner of the page.</p>
+          </div>
+          <div class="ext-step-card">
+            <div class="step-badge">Step 3</div>
+            <h4>Load Unpacked</h4>
+            <p>Click <strong>"Load unpacked"</strong> and paste/select the copied CryptoVeil extension folder.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live Telemetry & Shadow AI Stream -->
+    <div class="main-grid" style="margin-top:1.25rem;">
+      <!-- Browser Extension Live Stream -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">🌐 Live Browser Security Event Stream</div>
+          <span class="panel-badge" id="ext-status-badge">Extension Offline</span>
+        </div>
+        <div class="panel-body">
+          <div id="browser-events">
+            <div class="empty-state">Waiting for browser extension events…</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Shadow AI Monitor & Protections -->
+      <div style="display:flex;flex-direction:column;gap:1rem;">
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">🤖 Shadow AI Interception Monitor</div>
+            <span class="panel-badge">webRequest Pass</span>
+          </div>
+          <div class="panel-body" style="padding:1rem;">
+            <p style="font-size:0.75rem;color:var(--text-dim);margin-bottom:0.75rem;">
+              Intercepts outgoing API calls to unapproved third-party LLMs (OpenAI, Anthropic, Gemini, Perplexity, Cohere) from any active browser tab.
+            </p>
+            <div id="shadow-ai-list">
+              <div class="empty-state" style="height:80px;">No unauthorized AI API calls intercepted</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">🔒 DOM Value Masking &amp; Obfuscation</div>
+            <span class="panel-badge">Anti-Snoop</span>
+          </div>
+          <div class="panel-body" style="padding:1rem;">
+            <p style="font-size:0.75rem;color:var(--text-dim);">
+              Active Protections: DOM attribute obfuscation prevents malicious extensions and scripts from scraping sensitive password / seed phrase inputs.
+            </p>
+            <div class="protection-status-box" style="margin-top:0.75rem;">
+              <div class="prot-row"><span>Input Obfuscation:</span> <span class="badge-status-on">ENABLED</span></div>
+              <div class="prot-row"><span>Visual Screen-Share Masking:</span> <span class="badge-status-on">READY</span></div>
+              <div class="prot-row"><span>Typosquat Domain Classifier:</span> <span class="badge-status-on">ACTIVE</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ── TAB 7: Network Threats (C2 & DGA) ───────────────────────────── -->
+  <main class="tab-content" id="tab-network">
+    <div class="main-grid">
+      <!-- C2 Beaconing Monitor -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">📡 C2 Command &amp; Control Beaconing Monitor</div>
+          <span class="panel-badge">Statistical CoV &lt; 0.15</span>
+        </div>
+        <div class="panel-body">
+          <div id="c2-list" class="anomaly-list">
+            <div class="empty-state">No periodic C2 beacons detected</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- DGA Domain Entropy Monitor -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">🌐 DGA Domain Entropy Classifier</div>
+          <span class="panel-badge">Shannon Entropy &gt; 3.8</span>
+        </div>
+        <div class="panel-body">
+          <div id="dga-list" class="anomaly-list">
+            <div class="empty-state">No anomalous DGA domains detected</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ── Footer ───────────────────────────────────────────────────────── -->
+  <footer>
+    <div class="footer-left">
+      <span>CryptoVeil v2.0 SOC</span> · <span>Tamper-Evident Multi-Layer Security Suite</span>
+    </div>
+    <div class="footer-right">
+      <span id="footer-host-info">Host: 0.0.0.0:8765</span> · <span id="footer-uptime">Uptime: 0s</span>
+    </div>
+  </footer>
+
+</div>
+
+<!-- Modal / Drawer for Event JSON inspection -->
+<div class="modal-overlay" id="event-modal" style="display:none;">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-title">Event Record Inspector</div>
+      <button class="btn-tiny" id="btn-close-modal">✕ Close</button>
+    </div>
+    <div class="modal-body">
+      <pre id="modal-json" class="json-viewer"></pre>
+    </div>
+  </div>
+</div>
+
+<script src="js/dashboard.js"></script>
+</body>
+</html>

@@ -1,0 +1,93 @@
+{
+  "version": "1.0",
+  "description": "CryptoVeil MITRE ATT&CK Process Behavior Rule Set",
+  "rules": [
+    {
+      "id": "CV-T1055-001",
+      "mitre_id": "T1055.012",
+      "mitre_name": "Process Injection: Process Hollowing",
+      "severity": "critical",
+      "description": "svchost.exe spawned outside expected services.exe/svchost.exe/wininit.exe lineage",
+      "conditions": {
+        "process_name_in":    ["svchost.exe"],
+        "parent_name_not_in": ["services.exe", "svchost.exe", "wininit.exe"]
+      }
+    },
+    {
+      "id": "CV-T1059-001",
+      "mitre_id": "T1059.001",
+      "mitre_name": "Command and Scripting: PowerShell",
+      "severity": "high",
+      "description": "PowerShell or CMD spawned by an Office application (likely macro execution)",
+      "conditions": {
+        "process_name_in":  ["powershell.exe", "pwsh.exe", "cmd.exe"],
+        "parent_name_in":   ["winword.exe", "excel.exe", "powerpnt.exe", "outlook.exe", "onenote.exe"]
+      }
+    },
+    {
+      "id": "CV-T1047-001",
+      "mitre_id": "T1047",
+      "mitre_name": "Windows Management Instrumentation",
+      "severity": "high",
+      "description": "Shell process spawned by wmiprvse.exe (WMI lateral movement indicator)",
+      "conditions": {
+        "process_name_in": ["cmd.exe", "powershell.exe", "pwsh.exe", "wscript.exe", "cscript.exe"],
+        "parent_name_in":  ["wmiprvse.exe"]
+      }
+    },
+    {
+      "id": "CV-T1218-005",
+      "mitre_id": "T1218.005",
+      "mitre_name": "System Binary Proxy: Mshta",
+      "severity": "high",
+      "description": "mshta.exe launched with a remote URL argument (LOLBin abuse)",
+      "conditions": {
+        "process_name_in":    ["mshta.exe"],
+        "cmdline_regex":      "https?://"
+      }
+    },
+    {
+      "id": "CV-T1218-010",
+      "mitre_id": "T1218.010",
+      "mitre_name": "System Binary Proxy: Regsvr32",
+      "severity": "high",
+      "description": "regsvr32.exe used with scrobj.dll or remote URL (Squiblydoo attack)",
+      "conditions": {
+        "process_name_in": ["regsvr32.exe"],
+        "cmdline_regex":   "(scrobj|https?://)"
+      }
+    },
+    {
+      "id": "CV-T1036-005",
+      "mitre_id": "T1036.005",
+      "mitre_name": "Masquerading: Match Legitimate Name",
+      "severity": "medium",
+      "description": "Known-safe binary name running from a non-standard path (masquerading)",
+      "conditions": {
+        "process_name_in":   ["svchost.exe", "lsass.exe", "csrss.exe", "winlogon.exe"],
+        "exe_path_not_contains": ["\\Windows\\System32\\", "\\Windows\\SysWOW64\\"]
+      }
+    },
+    {
+      "id": "CV-T1003-001",
+      "mitre_id": "T1003.001",
+      "mitre_name": "Credential Dumping: LSASS Memory",
+      "severity": "critical",
+      "description": "procdump, mimikatz, or comsvcs used with lsass in command line",
+      "conditions": {
+        "cmdline_regex": "(lsass|mimikatz|procdump|comsvcs.*MiniDump)"
+      }
+    },
+    {
+      "id": "CV-T1059-003",
+      "mitre_id": "T1059.003",
+      "mitre_name": "Command and Scripting: Windows Command Shell",
+      "severity": "medium",
+      "description": "cmd.exe with encoded or piped commands suggesting script execution",
+      "conditions": {
+        "process_name_in": ["cmd.exe"],
+        "cmdline_regex":   "(/c\\s+|/k\\s+).*(powershell|wscript|mshta|certutil)"
+      }
+    }
+  ]
+}
