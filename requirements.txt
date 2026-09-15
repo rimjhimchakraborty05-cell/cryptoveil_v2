@@ -1,11 +1,2 @@
-fastapi>=0.111.0
-uvicorn[standard]>=0.29.0
-pydantic>=2.7.0
-psutil>=5.9.0
-watchdog>=4.0.0
-cryptography>=42.0.0
-websockets>=12.0
-requests>=2.31.0
-pyperclip>=1.8.2
-reportlab>=4.2.0
-pywebview>=6.0.0
+-r requirements-core.txt
+pywebview>=6,<7

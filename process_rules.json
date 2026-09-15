@@ -1,27 +1,43 @@
 {
-  "version": "1.0",
+  "version": "2.1",
   "description": "CryptoVeil MITRE ATT&CK Process Behavior Rule Set",
   "rules": [
     {
-      "id": "CV-T1055-001",
-      "mitre_id": "T1055.012",
-      "mitre_name": "Process Injection: Process Hollowing",
-      "severity": "critical",
-      "description": "svchost.exe spawned outside expected services.exe/svchost.exe/wininit.exe lineage",
+      "id": "CV-LINEAGE-001",
+      "mitre_id": "T1036.005",
+      "mitre_name": "Masquerading: Match Legitimate Name",
+      "severity": "medium",
+      "description": "Unexpected svchost.exe parent lineage; review for masquerading. This does not prove process hollowing.",
       "conditions": {
-        "process_name_in":    ["svchost.exe"],
-        "parent_name_not_in": ["services.exe", "svchost.exe", "wininit.exe"]
+        "process_name_in": [
+          "svchost.exe"
+        ],
+        "parent_name_not_in": [
+          "services.exe",
+          "svchost.exe",
+          "wininit.exe"
+        ]
       }
     },
     {
       "id": "CV-T1059-001",
-      "mitre_id": "T1059.001",
-      "mitre_name": "Command and Scripting: PowerShell",
+      "mitre_id": "T1059",
+      "mitre_name": "Command and Scripting Interpreter",
       "severity": "high",
-      "description": "PowerShell or CMD spawned by an Office application (likely macro execution)",
+      "description": "A shell was launched by an Office application; review whether this was expected.",
       "conditions": {
-        "process_name_in":  ["powershell.exe", "pwsh.exe", "cmd.exe"],
-        "parent_name_in":   ["winword.exe", "excel.exe", "powerpnt.exe", "outlook.exe", "onenote.exe"]
+        "process_name_in": [
+          "powershell.exe",
+          "pwsh.exe",
+          "cmd.exe"
+        ],
+        "parent_name_in": [
+          "winword.exe",
+          "excel.exe",
+          "powerpnt.exe",
+          "outlook.exe",
+          "onenote.exe"
+        ]
       }
     },
     {
@@ -31,8 +47,16 @@
       "severity": "high",
       "description": "Shell process spawned by wmiprvse.exe (WMI lateral movement indicator)",
       "conditions": {
-        "process_name_in": ["cmd.exe", "powershell.exe", "pwsh.exe", "wscript.exe", "cscript.exe"],
-        "parent_name_in":  ["wmiprvse.exe"]
+        "process_name_in": [
+          "cmd.exe",
+          "powershell.exe",
+          "pwsh.exe",
+          "wscript.exe",
+          "cscript.exe"
+        ],
+        "parent_name_in": [
+          "wmiprvse.exe"
+        ]
       }
     },
     {
@@ -42,8 +66,10 @@
       "severity": "high",
       "description": "mshta.exe launched with a remote URL argument (LOLBin abuse)",
       "conditions": {
-        "process_name_in":    ["mshta.exe"],
-        "cmdline_regex":      "https?://"
+        "process_name_in": [
+          "mshta.exe"
+        ],
+        "cmdline_regex": "https?://"
       }
     },
     {
@@ -53,8 +79,10 @@
       "severity": "high",
       "description": "regsvr32.exe used with scrobj.dll or remote URL (Squiblydoo attack)",
       "conditions": {
-        "process_name_in": ["regsvr32.exe"],
-        "cmdline_regex":   "(scrobj|https?://)"
+        "process_name_in": [
+          "regsvr32.exe"
+        ],
+        "cmdline_regex": "(scrobj|https?://)"
       }
     },
     {
@@ -64,8 +92,16 @@
       "severity": "medium",
       "description": "Known-safe binary name running from a non-standard path (masquerading)",
       "conditions": {
-        "process_name_in":   ["svchost.exe", "lsass.exe", "csrss.exe", "winlogon.exe"],
-        "exe_path_not_contains": ["\\Windows\\System32\\", "\\Windows\\SysWOW64\\"]
+        "process_name_in": [
+          "svchost.exe",
+          "lsass.exe",
+          "csrss.exe",
+          "winlogon.exe"
+        ],
+        "exe_path_not_contains": [
+          "\\Windows\\System32\\",
+          "\\Windows\\SysWOW64\\"
+        ]
       }
     },
     {
@@ -73,9 +109,15 @@
       "mitre_id": "T1003.001",
       "mitre_name": "Credential Dumping: LSASS Memory",
       "severity": "critical",
-      "description": "procdump, mimikatz, or comsvcs used with lsass in command line",
+      "description": "A known tool references LSASS memory dumping; review command-line evidence.",
       "conditions": {
-        "cmdline_regex": "(lsass|mimikatz|procdump|comsvcs.*MiniDump)"
+        "process_name_in": [
+          "procdump.exe",
+          "procdump64.exe",
+          "rundll32.exe",
+          "mimikatz.exe"
+        ],
+        "cmdline_regex": "(lsass(?:\\.exe)?\\b|mimikatz|comsvcs(?:\\.dll)?.*MiniDump)"
       }
     },
     {
@@ -85,8 +127,10 @@
       "severity": "medium",
       "description": "cmd.exe with encoded or piped commands suggesting script execution",
       "conditions": {
-        "process_name_in": ["cmd.exe"],
-        "cmdline_regex":   "(/c\\s+|/k\\s+).*(powershell|wscript|mshta|certutil)"
+        "process_name_in": [
+          "cmd.exe"
+        ],
+        "cmdline_regex": "(/c\\s+|/k\\s+).*(powershell|wscript|mshta|certutil)"
       }
     }
   ]

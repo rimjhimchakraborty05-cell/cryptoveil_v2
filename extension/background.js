@@ -1,385 +1,479 @@
-/**
- * background.js — CryptoVeil MV3 Service Worker
- *
- * Responsibilities:
- *   1. Two-pass domain trust scoring (local heuristics + companion app network pass)
- *   2. Persistent WebSocket bridge to the companion agent (with local queue for SW restarts)
- *   3. Shadow AI Monitor: webRequest interception of known AI API endpoints
- *   4. Forward all browser events to the agent as BrowserTelemetryEvent
- *   5. Receive agent pushes (trust updates, MITRE alerts, threat notifications)
- *   6. Badge management — show threat count on extension icon
- *   7. Alert storage — persist recent alerts for popup display
- */
-
-const AGENT_HTTP = "http://127.0.0.1:8765";
-const AGENT_WS   = "ws://127.0.0.1:8765/ws/extension";
-
-// ── Known brand list for typosquat detection ──────────────────────────
-const KNOWN_BRANDS = [
-  "google.com","paypal.com","microsoft.com","apple.com","amazon.com",
-  "facebook.com","bankofamerica.com","chase.com","wellsfargo.com",
-  "netflix.com","instagram.com","linkedin.com","github.com","dropbox.com",
-  "twitter.com","youtube.com","spotify.com",
+/* CryptoVeil: paired, acknowledged evidence delivery. No form values or URL paths are collected. */
+const DEFAULT_APP = "http://127.0.0.1:8765";
+const QUEUE_LIMIT = 1000;
+const TYPES = new Set([
+  "site_visit",
+  "site_warning",
+  "shadow_ai_network",
+  "shadow_ai_iframe",
+  "sensitive_field_used",
+  "masking_activated",
+  "masking_deactivated",
+  "collection_gap",
+]);
+const BRANDS = [
+  "google.com",
+  "paypal.com",
+  "microsoft.com",
+  "apple.com",
+  "amazon.com",
+  "facebook.com",
+  "netflix.com",
+  "instagram.com",
+  "linkedin.com",
+  "github.com",
+  "youtube.com",
 ];
-
-// ── Known AI API domains ──────────────────────────────────────────────
-const AI_API_HOSTS = [
-  "api.openai.com","api.anthropic.com","generativelanguage.googleapis.com",
-  "api.perplexity.ai","api.cohere.ai","api.mistral.ai",
-  "copilot.microsoft.com","api.together.xyz","openrouter.ai",
+const AI_HOSTS = [
+  "api.openai.com",
+  "api.anthropic.com",
+  "generativelanguage.googleapis.com",
+  "api.perplexity.ai",
+  "api.cohere.ai",
+  "api.mistral.ai",
+  "copilot.microsoft.com",
+  "api.together.xyz",
+  "openrouter.ai",
 ];
-
-// ── Utility ───────────────────────────────────────────────────────────
-function levenshtein(a, b) {
-  const dp = Array.from({length: a.length+1}, () => new Array(b.length+1).fill(0));
-  for (let i=0;i<=a.length;i++) dp[i][0]=i;
-  for (let j=0;j<=b.length;j++) dp[0][j]=j;
-  for (let i=1;i<=a.length;i++)
-    for (let j=1;j<=b.length;j++) {
-      const c = a[i-1]===b[j-1] ? 0 : 1;
-      dp[i][j] = Math.min(dp[i-1][j]+1, dp[i][j-1]+1, dp[i-1][j-1]+c);
-    }
-  return dp[a.length][b.length];
+const cache = new Map();
+let config = { app_url: DEFAULT_APP, token: "", name: "" },
+  flushing = false;
+function hostOnly(value) {
+  try {
+    return new URL(
+      value.includes("://") ? value : `https://${value}`,
+    ).hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
 }
-
-function shannonEntropy(s) {
-  const f={};
-  for (const c of s) f[c]=(f[c]||0)+1;
-  let e=0; const n=s.length;
-  for (const c in f) { const p=f[c]/n; e-=p*Math.log2(p); }
-  return e;
+function appURL(value) {
+  const url = new URL(value);
+  if (
+    url.protocol !== "http:" ||
+    !["127.0.0.1", "localhost"].includes(url.hostname) ||
+    url.username ||
+    url.password
+  )
+    throw new Error("Use a local address such as http://127.0.0.1:8765");
+  return url.origin;
 }
-
-function localScore(hostname) {
-  let score=100; const reasons=[];
-  // Typosquat check
-  for (const brand of KNOWN_BRANDS) {
-    const d = levenshtein(hostname, brand);
-    if (d > 0 && d <= 2) {
-      score -= 40;
-      reasons.push(`Hostname is ${d} edit(s) from "${brand}" — possible typosquat`);
+function editDistance(a, b) {
+  let row = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i];
+    for (let j = 1; j <= b.length; j++)
+      next[j] = Math.min(
+        next[j - 1] + 1,
+        row[j] + 1,
+        row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    row = next;
+  }
+  return row[b.length];
+}
+function localScore(raw) {
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return { score: 100, reasons: [] };
+  }
+  const host = url.hostname.toLowerCase();
+  let score = 100;
+  const reasons = [];
+  if (url.protocol === "http:") {
+    score -= 25;
+    reasons.push("This page uses unencrypted HTTP.");
+  }
+  if (BRANDS.some((b) => host === b || host.endsWith(`.${b}`)))
+    return { score, reasons };
+  const candidate = host.replace(/^www\./, "");
+  for (const brand of BRANDS) {
+    if (Math.abs(candidate.length - brand.length) > 2) continue;
+    const distance = editDistance(candidate, brand);
+    if (distance > 0 && distance <= 2) {
+      score -= 50;
+      reasons.push(`The hostname resembles ${brand}; check its spelling.`);
       break;
     }
   }
-  // Entropy check (DGA/phishing-kit signature)
-  const ent = shannonEntropy(hostname.replace(/\./g,''));
-  if (ent > 3.8) { score-=20; reasons.push(`High hostname entropy (${ent.toFixed(2)}) — DGA pattern`); }
+  if (host.includes("xn--")) {
+    score -= 15;
+    reasons.push("This is an internationalised hostname; check it carefully.");
+  }
+  const label = host.split(".")[0],
+    digits = (label.match(/\d/g) || []).length;
+  if (label.length > 18 && digits / label.length > 0.3) {
+    score -= 20;
+    reasons.push("The hostname has a long, unusual letter-and-number pattern.");
+  }
   return { score: Math.max(0, score), reasons };
 }
-
-function isAiHost(hostname) {
-  const h = hostname.toLowerCase();
-  return AI_API_HOSTS.find(d => h === d || h.endsWith('.'+d)) || null;
-}
-
-// ── Account & Identity State ──────────────────────────────────────────
-let currentAccount = { user_email: '', browser_name: '', profile_dir: '' };
-
-async function loadAccount() {
-  const { cv_user_email = '', cv_browser_name = '', cv_profile_dir = '' } =
-    await chrome.storage.local.get(['cv_user_email', 'cv_browser_name', 'cv_profile_dir']);
-  currentAccount = { user_email: cv_user_email, browser_name: cv_browser_name, profile_dir: cv_profile_dir };
-}
-loadAccount();
-
-// ── Event queue (survives SW suspension) ─────────────────────────────
-async function enqueue(event) {
-  const {cv_queue=[]} = await chrome.storage.local.get('cv_queue');
-  cv_queue.push({...event, ts: Date.now(), user_email: currentAccount.user_email, browser_name: currentAccount.browser_name});
-  if (cv_queue.length > 300) cv_queue.splice(0, cv_queue.length-300);
-  await chrome.storage.local.set({cv_queue});
-}
-
-async function flushQueue(ws) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  const {cv_queue=[]} = await chrome.storage.local.get('cv_queue');
-  if (!cv_queue.length) return;
-  for (const ev of cv_queue) {
-    try { ws.send(JSON.stringify(ev)); } catch(_) {}
-  }
-  await chrome.storage.local.set({cv_queue:[]});
-}
-
-// ── Alert storage ─────────────────────────────────────────────────────
-async function storeAlert(alert) {
-  const {cv_alerts=[]} = await chrome.storage.local.get('cv_alerts');
-  cv_alerts.push({...alert, ts: Date.now()});
-  // Keep only last 50 alerts
-  if (cv_alerts.length > 50) cv_alerts.splice(0, cv_alerts.length - 50);
-  await chrome.storage.local.set({cv_alerts});
-
-  // Notify popup if open
-  chrome.runtime.sendMessage({type: 'cv_alert_added'}).catch(()=>{});
-}
-
-// ── Badge management ──────────────────────────────────────────────────
-let threatBadgeCount = 0;
-
-function updateBadge() {
-  if (threatBadgeCount > 0) {
-    chrome.action.setBadgeText({text: String(threatBadgeCount)});
-    chrome.action.setBadgeBackgroundColor({color: '#ff4455'});
-  } else {
-    chrome.action.setBadgeText({text: ''});
-  }
-}
-
-// Reset badge on startup
-chrome.action.setBadgeText({text: ''});
-
-// ── WebSocket bridge (bidirectional) ──────────────────────────────────
-let ws=null, reconnDelay=1500, _online=false;
-
-function setOnline(online) {
-  if (_online===online) return;
-  _online=online;
-  chrome.storage.local.set({cv_agent_online:{online, ts:Date.now()}});
-  // Notify popup about connection change
-  chrome.runtime.sendMessage({type: 'cv_connection_change', online}).catch(()=>{});
-}
-
-function connectBridge() {
-  try {
-    ws = new WebSocket(AGENT_WS);
-
-    ws.onopen = async ()=>{
-      reconnDelay=1500;
-      setOnline(true);
-      await loadAccount();
-      try {
-        ws.send(JSON.stringify({
-          type: 'extension_hello',
-          user_email: currentAccount.user_email,
-          browser_name: currentAccount.browser_name,
-          profile_dir: currentAccount.profile_dir,
-        }));
-      } catch (_) {}
-      flushQueue(ws);
-    };
-
-    // ── Receive agent pushes ──────────────────────────────────────────
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        handleAgentPush(msg);
-      } catch(_) {}
-    };
-
-    ws.onclose= ()=>{
-      ws=null;
-      setOnline(false);
-      setTimeout(connectBridge,reconnDelay);
-      reconnDelay=Math.min(reconnDelay*2,30000);
-    };
-
-    ws.onerror= ()=>{ try{ws.close();}catch(_){} };
-  } catch(_) {
-    setOnline(false);
-    setTimeout(connectBridge, reconnDelay);
-    reconnDelay = Math.min(reconnDelay*2, 30000);
-  }
-}
-connectBridge();
-
-// ── Handle agent push messages ────────────────────────────────────────
-async function handleAgentPush(msg) {
-  const pushType = msg.push_type || msg.type;
-
-  switch (pushType) {
-    case 'trust_update': {
-      // Agent has processed a site and sends back enriched trust info
-      const hostname = msg.hostname;
-      const score = msg.score ?? msg.trust_score;
-      const reasons = msg.reasons || [];
-
-      if (hostname && score !== undefined) {
-        // Update cache
-        scoreCache.set(hostname, {score, reasons, ts: Date.now(), network: true});
-
-        // Push to content script on the active tab
-        const tabs = await chrome.tabs.query({active: true, currentWindow: true});
-        for (const tab of tabs) {
-          try {
-            const tabHost = new URL(tab.url).hostname;
-            if (tabHost === hostname) {
-              chrome.tabs.sendMessage(tab.id, {
-                type: 'cv_trust_update',
-                score: score,
-                reasons: reasons,
-              }).catch(()=>{});
-            }
-          } catch(_) {}
-        }
-
-        // Notify popup
-        chrome.runtime.sendMessage({
-          type: 'cv_score_update',
-          hostname, score, reasons
-        }).catch(()=>{});
-      }
-      break;
-    }
-
-    case 'threat_alert': {
-      // Agent detected a threat (MITRE, C2, DGA, etc.)
-      threatBadgeCount++;
-      updateBadge();
-
-      await storeAlert({
-        type: 'agent_threat',
-        topic: msg.topic || 'unknown',
-        description: msg.description || msg.detail || 'Threat detected by agent',
-        severity: msg.severity || 'high',
-      });
-
-      // Chrome notification for critical threats
-      if (msg.severity === 'critical' || msg.severity === 'high') {
-        chrome.notifications.create({
-          type: 'basic',
-          iconUrl: 'icons/icon128.png',
-          title: 'CryptoVeil — Threat Detected',
-          message: msg.description || `${msg.topic}: Security threat detected`,
-          priority: 2,
-        });
-      }
-      break;
-    }
-
-    case 'extension_command': {
-      // Agent can request the extension to take actions
-      if (msg.action === 'enable_masking') {
-        const tabs = await chrome.tabs.query({active: true, currentWindow: true});
-        for (const tab of tabs) {
-          chrome.tabs.sendMessage(tab.id, {
-            type: 'cv_screen_share',
-            active: true,
-          }).catch(()=>{});
-        }
-      }
-      break;
-    }
-  }
-}
-
-async function sendEvent(ev) {
-  const payload = {
-    ...ev,
-    ts: Date.now(),
-    user_email: currentAccount.user_email,
-    browser_name: currentAccount.browser_name,
-    profile_dir: currentAccount.profile_dir,
+function normalize(event) {
+  if (!event || typeof event !== "object" || !TYPES.has(event.type))
+    return null;
+  const result = {
+    event_id: event.event_id || crypto.randomUUID(),
+    type: event.type,
+    collected_at_ms: Number.isInteger(event.collected_at_ms)
+      ? event.collected_at_ms
+      : Number.isInteger(event.ts)
+        ? event.ts
+        : Date.now(),
   };
-  if (ws && ws.readyState===WebSocket.OPEN) {
-    try { ws.send(JSON.stringify(payload)); return; } catch(_) {}
+  if (event.hostname) {
+    const h = hostOnly(event.hostname);
+    if (h && /^[a-z0-9][a-z0-9.\-]{0,252}$/.test(h)) result.hostname = h;
   }
-  await enqueue(payload);
+  if (Number.isInteger(event.score))
+    result.score = Math.max(0, Math.min(100, event.score));
+  if (Array.isArray(event.reasons))
+    result.reasons = event.reasons
+      .slice(0, 10)
+      .map((s) => String(s).slice(0, 250));
+  const ai = hostOnly(event.ai_domain || event.aiDomain || "");
+  if (ai) result.ai_domain = ai;
+  if (event.field_type)
+    result.field_type = String(event.field_type).slice(0, 30);
+  if (event.dropped_count)
+    result.dropped_count = Math.min(
+      2 ** 31 - 1,
+      Math.max(0, event.dropped_count),
+    );
+  return result;
 }
-
-// ── Trust scoring on navigation ───────────────────────────────────────
-const scoreCache = new Map();
-
-chrome.webNavigation.onBeforeNavigate.addListener(async details => {
-  if (details.frameId !== 0) return;
-  let hostname;
-  try { hostname = new URL(details.url).hostname; } catch(_) { return; }
-  if (!hostname) return;
-
-  const local = localScore(hostname);
-  scoreCache.set(hostname, {...local, ts: Date.now(), network: false});
-
-  // Notify popup of new score
-  chrome.runtime.sendMessage({
-    type: 'cv_score_update',
-    hostname, score: local.score, reasons: local.reasons
-  }).catch(()=>{});
-
-  if (local.score < 50) {
-    await storeAlert({
-      type: 'site_warning',
-      hostname,
-      score: local.score,
-      reasons: local.reasons,
-    });
-    await sendEvent({type:'site_warning', hostname, score:local.score, reasons:local.reasons});
-    threatBadgeCount++;
-    updateBadge();
-  }
-
-  // Async network pass — send to agent with bound account info
+async function initialize() {
   try {
-    await fetch(`${AGENT_HTTP}/api/browser/telemetry`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        type:'site_visit',
-        hostname,
-        score:local.score,
-        user_email: currentAccount.user_email,
-        browser_name: currentAccount.browser_name,
-      }),
+    if (chrome.storage.local.setAccessLevel)
+      await chrome.storage.local.setAccessLevel({
+        accessLevel: "TRUSTED_CONTEXTS",
+      });
+  } catch {}
+  const data = await chrome.storage.local.get([
+    "cv_config",
+    "cv_queue",
+    "cv_queue_version",
+    "cv_legacy_queue",
+  ]);
+  config = { ...config, ...data.cv_config };
+  try {
+    config.app_url = appURL(config.app_url);
+  } catch {
+    config.app_url = DEFAULT_APP;
+    config.token = "";
+  }
+  if (data.cv_queue_version !== 2) {
+    const old = data.cv_queue || [],
+      migrated = old.map(normalize).filter(Boolean);
+    await chrome.storage.local.set({
+      cv_queue: migrated,
+      cv_queue_version: 2,
+      cv_legacy_queue: [
+        ...(data.cv_legacy_queue || []),
+        ...old.filter((e) => !TYPES.has(e.type)),
+      ],
+      cv_config: config,
     });
-  } catch(_) {}
+  }
+}
+const ready = initialize();
+let serial = ready;
+function locked(work) {
+  const result = serial.then(work);
+  serial = result.catch(() => {});
+  return result;
+}
+async function updateStatus(update) {
+  await locked(async () => {
+    const { cv_status = {} } = await chrome.storage.local.get("cv_status");
+    await chrome.storage.local.set({
+      cv_status: { ...cv_status, ...update, updated_at: Date.now() },
+    });
+  });
+}
+async function queueEvent(event) {
+  const normalized = normalize(event);
+  if (!normalized) return;
+  await locked(async () => {
+    const data = await chrome.storage.local.get([
+      "cv_queue",
+      "cv_gap_pending",
+      "cv_dropped_total",
+    ]);
+    const queue = data.cv_queue || [];
+    if (queue.length >= QUEUE_LIMIT) {
+      await chrome.storage.local.set({
+        cv_gap_pending: Math.min(2 ** 31 - 1, (data.cv_gap_pending || 0) + 1),
+        cv_dropped_total: Math.min(
+          2 ** 31 - 1,
+          (data.cv_dropped_total || 0) + 1,
+        ),
+      });
+      return;
+    }
+    queue.push(normalized);
+    await chrome.storage.local.set({ cv_queue: queue });
+  });
+  await flushQueue();
+}
+async function request(path, body, token = config.token) {
+  const response = await fetch(`${config.app_url}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(8000),
+  });
+  let data = {};
+  try {
+    data = await response.json();
+  } catch {}
+  if (!response.ok) {
+    const error = new Error(
+      typeof data.detail === "string"
+        ? data.detail
+        : `Request rejected (${response.status}). Evidence stays queued.`,
+    );
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+}
+async function flushQueue() {
+  await ready;
+  if (flushing || !config.token) return;
+  flushing = true;
+  try {
+    for (let i = 0; i < 40; i++) {
+      const event = await locked(async () => {
+        const data = await chrome.storage.local.get([
+          "cv_queue",
+          "cv_gap_pending",
+        ]);
+        const queue = data.cv_queue || [];
+        if (data.cv_gap_pending && queue.length < QUEUE_LIMIT) {
+          queue.push(
+            normalize({
+              type: "collection_gap",
+              dropped_count: data.cv_gap_pending,
+              reasons: [
+                "The offline queue reached capacity; some observations could not be saved.",
+              ],
+            }),
+          );
+          await chrome.storage.local.set({
+            cv_queue: queue,
+            cv_gap_pending: 0,
+          });
+        }
+        return queue[0];
+      });
+      if (!event) break;
+      const ack = await request("/api/browser/telemetry", event);
+      if (
+        !ack.received ||
+        ack.event_id !== event.event_id ||
+        !Number.isInteger(ack.seq) ||
+        !/^[a-f0-9]{64}$/.test(ack.hash || "")
+      )
+        throw new Error(
+          "The app did not provide a valid storage receipt. Evidence stays queued.",
+        );
+      await locked(async () => {
+        const { cv_queue = [] } = await chrome.storage.local.get("cv_queue");
+        await chrome.storage.local.set({
+          cv_queue: cv_queue.filter((e) => e.event_id !== event.event_id),
+          cv_latest_receipt: {
+            seq: ack.seq,
+            hash: ack.hash,
+            received_at: Date.now(),
+          },
+        });
+      });
+    }
+    const { cv_queue = [], cv_dropped_total = 0 } =
+      await chrome.storage.local.get(["cv_queue", "cv_dropped_total"]);
+    const heartbeat = await request("/api/browser/heartbeat", {
+      queued_events: cv_queue.length,
+      dropped_events: cv_dropped_total,
+    });
+    await updateStatus({
+      online: true,
+      collection_paused: heartbeat.collection_paused,
+      last_error: "",
+    });
+    await chrome.action.setBadgeText({
+      text: heartbeat.collection_paused
+        ? "!"
+        : cv_queue.length
+          ? String(Math.min(99, cv_queue.length))
+          : "",
+    });
+    await chrome.action.setBadgeBackgroundColor({
+      color: heartbeat.collection_paused ? "#ac3e3b" : "#356b4f",
+    });
+  } catch (error) {
+    if (error.status === 401) {
+      await locked(async () => {
+        config.token = "";
+        await chrome.storage.local.set({ cv_config: config });
+      });
+    }
+    await updateStatus({
+      online: false,
+      collection_paused: error.status === 503,
+      last_error: error.message,
+    });
+    await chrome.action.setBadgeText({ text: "!" });
+    await chrome.action.setBadgeBackgroundColor({ color: "#a56a26" });
+  } finally {
+    flushing = false;
+  }
+}
+chrome.alarms.create("cv_delivery", { periodInMinutes: 0.5 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === "cv_delivery") flushQueue();
 });
-
-// ── Shadow AI Monitor: webRequest pass ───────────────────────────────
+chrome.runtime.onStartup.addListener(() => flushQueue());
+ready.then(() => flushQueue()).catch(() => {});
+chrome.webNavigation.onCommitted.addListener(async (details) => {
+  if (details.frameId !== 0 || !/^https?:/.test(details.url)) return;
+  const url = new URL(details.url);
+  if (["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) return;
+  const scored = localScore(details.url);
+  cache.set(details.tabId, scored);
+  if (cache.size > 256) cache.delete(cache.keys().next().value);
+  chrome.tabs
+    .sendMessage(details.tabId, { type: "cv_trust_update", ...scored })
+    .catch(() => {});
+  await queueEvent({ type: "site_visit", hostname: url.hostname, ...scored });
+  if (scored.score < 65)
+    await queueEvent({
+      type: "site_warning",
+      hostname: url.hostname,
+      ...scored,
+    });
+});
+const aiLastSeen = new Map();
 chrome.webRequest.onBeforeRequest.addListener(
-  details => {
+  (details) => {
     if (details.tabId < 0) return;
-    let h;
-    try { h = new URL(details.url).hostname; } catch(_) { return; }
-    const matched = isAiHost(h);
-    if (matched) {
-      const alert = {type:'shadow_ai_network', aiDomain:matched, url:details.url, tabId:details.tabId};
-      sendEvent(alert);
-      storeAlert(alert);
-      threatBadgeCount++;
-      updateBadge();
-    }
+    const host = hostOnly(details.url);
+    const matched = AI_HOSTS.find((h) => host === h || host?.endsWith(`.${h}`));
+    if (!matched) return;
+    const key = `${details.tabId}:${matched}`,
+      now = Date.now();
+    if (now - (aiLastSeen.get(key) || 0) < 60000) return;
+    aiLastSeen.set(key, now);
+    if (aiLastSeen.size > 256)
+      aiLastSeen.delete(aiLastSeen.keys().next().value);
+    queueEvent({
+      type: "shadow_ai_network",
+      ai_domain: matched,
+      hostname: host,
+    }).catch(() => {});
   },
-  { urls: ['<all_urls>'] }
+  { urls: ["http://*/*", "https://*/*"] },
 );
-
-// ── Message handler ───────────────────────────────────────────────────
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, respond) => {
+  if (sender.id !== chrome.runtime.id) return false;
   (async () => {
-    if (msg.type === 'cv_account_updated') {
-      currentAccount = {
-        user_email: msg.user_email || '',
-        browser_name: msg.browser_name || '',
-        profile_dir: msg.profile_dir || '',
-      };
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        try {
-          ws.send(JSON.stringify({
-            type: 'extension_account_sync',
-            user_email: currentAccount.user_email,
-            browser_name: currentAccount.browser_name,
-            profile_dir: currentAccount.profile_dir,
-          }));
-        } catch (_) {}
-      }
-      sendResponse({ok:true});
-    } else if (msg.type === 'cv_dom_event') {
-      await sendEvent({...msg.payload, tabId: sender.tab?.id});
-      sendResponse({ok:true});
-    } else if (msg.type === 'cv_get_score') {
-      sendResponse(scoreCache.get(msg.hostname) || null);
-    } else if (msg.type === 'cv_get_status') {
-      const {cv_agent_online} = await chrome.storage.local.get('cv_agent_online');
-      sendResponse(cv_agent_online || {online:false});
+    await ready;
+    const popup = sender.url === chrome.runtime.getURL("popup.html");
+    if (message.type === "cv_dom_event" && sender.tab) {
+      const pageHost = hostOnly(sender.tab.url || "");
+      if (
+        ![
+          "shadow_ai_iframe",
+          "sensitive_field_used",
+          "masking_activated",
+          "masking_deactivated",
+        ].includes(message.payload?.type)
+      )
+        throw new Error("Unsupported page observation");
+      await queueEvent({ ...message.payload, hostname: pageHost });
+      return { ok: true };
     }
-  })();
+    if (message.type === "cv_get_page_settings") {
+      const data = await chrome.storage.local.get("cv_masking");
+      const url = sender.tab?.url || message.url || "";
+      return { ...localScore(url), masking: Boolean(data.cv_masking) };
+    }
+    if (!popup)
+      throw new Error(
+        "This action is available from the extension popup only.",
+      );
+    if (message.type === "cv_status") {
+      const data = await chrome.storage.local.get([
+        "cv_queue",
+        "cv_status",
+        "cv_latest_receipt",
+        "cv_dropped_total",
+        "cv_masking",
+        "cv_legacy_queue",
+      ]);
+      return {
+        paired: Boolean(config.token),
+        name: config.name,
+        app_url: config.app_url,
+        queue_count: (data.cv_queue || []).length,
+        status: data.cv_status || {},
+        last_receipt: data.cv_latest_receipt,
+        dropped_total: data.cv_dropped_total || 0,
+        masking: Boolean(data.cv_masking),
+        legacy_count: (data.cv_legacy_queue || []).length,
+      };
+    }
+    if (message.type === "cv_pair") {
+      const url = appURL(message.app_url);
+      let result;
+      await locked(async () => {
+        config.app_url = url;
+        result = await request(
+          "/api/pairing/complete",
+          {
+            code: String(message.code).trim(),
+            name: String(message.name || "My browser").slice(0, 60),
+          },
+          "",
+        );
+        config = { app_url: url, token: result.token, name: result.name };
+        await chrome.storage.local.set({ cv_config: config });
+      });
+      await flushQueue();
+      return { ok: true };
+    }
+    if (message.type === "cv_retry") {
+      await flushQueue();
+      return { ok: true };
+    }
+    if (message.type === "cv_masking") {
+      await locked(() =>
+        chrome.storage.local.set({ cv_masking: Boolean(message.active) }),
+      );
+      const tabs = await chrome.tabs.query({});
+      await Promise.allSettled(
+        tabs.map((tab) =>
+          chrome.tabs.sendMessage(tab.id, {
+            type: "cv_masking",
+            active: Boolean(message.active),
+          }),
+        ),
+      );
+      return { ok: true };
+    }
+    if (message.type === "cv_open_app") {
+      await chrome.tabs.create({ url: `${config.app_url}/dashboard/` });
+      return { ok: true };
+    }
+    throw new Error("Unknown request");
+  })()
+    .then(respond)
+    .catch((error) => respond({ error: error.message }));
   return true;
 });
-
-// ── Periodic badge reset (every 30 min) ──────────────────────────────
-if (typeof chrome !== 'undefined' && chrome.alarms) {
-  try {
-    chrome.alarms.create('cv_badge_reset', { periodInMinutes: 30 });
-    chrome.alarms.onAlarm.addListener(alarm => {
-      if (alarm.name === 'cv_badge_reset') {
-        threatBadgeCount = 0;
-        updateBadge();
-      }
-    });
-  } catch (_) {}
-}
+// Pure functions are exported for regression tests; tokens never leave the worker.
+export { localScore, normalize, queueEvent, flushQueue, ready };

@@ -10,14 +10,14 @@ encrypting a directory tree in bulk.
 Watchdog callbacks run on an OS thread, not the asyncio event loop, so all
 publishing goes through EventBroker.publish_threadsafe().
 """
+
 from __future__ import annotations
 
 import logging
 import math
 import os
 import time
-from collections import deque
-from typing import Deque
+from pathlib import Path
 
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
@@ -27,10 +27,10 @@ from ..bus.events import EventSeverity, FileEntropyEvent
 
 log = logging.getLogger("cryptoveil.sensors.entropy")
 
-ENTROPY_THRESHOLD = 7.2       # bits/byte — near-random data (encrypted/compressed)
-SAMPLE_BYTES = 65536          # read at most this many bytes per file
-BURST_WINDOW_SECONDS = 20.0   # sliding window for burst detection
-BURST_COUNT_THRESHOLD = 8     # high-entropy writes within window → burst
+ENTROPY_THRESHOLD = 7.2  # bits/byte — near-random data (encrypted/compressed)
+SAMPLE_BYTES = 65536  # read at most this many bytes per file
+BURST_WINDOW_SECONDS = 20.0  # sliding window for burst detection
+BURST_COUNT_THRESHOLD = 8  # high-entropy writes within window → burst
 
 
 def shannon_entropy(data: bytes) -> float:
@@ -50,7 +50,7 @@ def shannon_entropy(data: bytes) -> float:
 
 
 class _Handler(FileSystemEventHandler):
-    def __init__(self, watcher: "EntropyWatcher") -> None:
+    def __init__(self, watcher: EntropyWatcher) -> None:
         self._watcher = watcher
 
     def on_created(self, event):
@@ -76,6 +76,7 @@ class EntropyWatcher:
         entropy_threshold: float = ENTROPY_THRESHOLD,
         burst_window_seconds: float = BURST_WINDOW_SECONDS,
         burst_count_threshold: int = BURST_COUNT_THRESHOLD,
+        exclude_paths: list[str] | None = None,
     ) -> None:
         self._broker = broker
         self._watch_paths = [p for p in watch_paths if os.path.isdir(p)]
@@ -83,57 +84,67 @@ class EntropyWatcher:
         self._burst_window = burst_window_seconds
         self._burst_count_threshold = burst_count_threshold
         self._observer = Observer()
-        self._recent_high_entropy: Deque[float] = deque()
+        self._recent_high_entropy: dict[str, float] = {}
+        self._excluded = [Path(p).resolve() for p in (exclude_paths or [])]
+        self._last_seen: dict[str, float] = {}
+        self._last_alert = -100.0
+        self.status, self.last_error = "starting", None
 
     def start(self) -> None:
         if not self._watch_paths:
-            log.warning("EntropyWatcher: no valid watch paths configured, sensor idle")
+            self.status, self.last_error = "unavailable", "No valid watched folders configured"
+            log.warning(self.last_error)
             return
         handler = _Handler(self)
         for path in self._watch_paths:
             self._observer.schedule(handler, path, recursive=True)
         self._observer.start()
+        self.status = "active"
         log.info("EntropyWatcher started on %s", self._watch_paths)
 
     def stop(self) -> None:
         if self._observer.is_alive():
             self._observer.stop()
-            self._observer.join(timeout=2)
+            self._observer.join(timeout=5)
+        self.status = "stopped"
 
     def handle(self, path: str, kind: str) -> None:
-        try:
-            with open(path, "rb") as f:
-                data = f.read(SAMPLE_BYTES)
-        except (OSError, PermissionError):
+        resolved = Path(path).resolve()
+        if any(resolved == p or p in resolved.parents for p in self._excluded):
             return
-
-        entropy = shannon_entropy(data)
-        is_high = entropy >= self._entropy_threshold
-
-        burst_triggered = False
+        if any(part in {".git", ".venv", "node_modules", "__pycache__"} for part in resolved.parts):
+            return
         now = time.monotonic()
+        if now - self._last_seen.get(str(resolved), -100) < 0.5:
+            return
+        self._last_seen = {p: t for p, t in self._last_seen.items() if now - t < self._burst_window}
+        self._last_seen[str(resolved)] = now
+        try:
+            with resolved.open("rb") as stream:
+                data = stream.read(SAMPLE_BYTES)
+        except OSError:
+            return
+        entropy = shannon_entropy(data)
+        is_high = len(data) >= 1024 and entropy >= self._entropy_threshold
+        self._recent_high_entropy = {
+            p: t for p, t in self._recent_high_entropy.items() if now - t < self._burst_window
+        }
         if is_high:
-            self._recent_high_entropy.append(now)
-            while (
-                self._recent_high_entropy
-                and now - self._recent_high_entropy[0] > self._burst_window
-            ):
-                self._recent_high_entropy.popleft()
-            if len(self._recent_high_entropy) >= self._burst_count_threshold:
-                burst_triggered = True
-
-        severity = EventSeverity.INFO
-        if is_high:
-            severity = EventSeverity.MEDIUM
-        if burst_triggered:
-            severity = EventSeverity.CRITICAL
-
-        event = FileEntropyEvent(
-            severity=severity,
-            file_path=path,
-            entropy=round(entropy, 3),
-            event_kind=kind,
-            burst_count=len(self._recent_high_entropy),
-            burst_triggered=burst_triggered,
+            self._recent_high_entropy[str(resolved)] = now
+        burst = (
+            is_high
+            and len(self._recent_high_entropy) >= self._burst_count_threshold
+            and now - self._last_alert >= 15
         )
-        self._broker.publish_threadsafe(event)
+        if burst:
+            self._last_alert = now
+        self._broker.publish_threadsafe(
+            FileEntropyEvent(
+                severity=EventSeverity.HIGH if burst else EventSeverity.INFO,
+                file_path=str(resolved),
+                entropy=round(entropy, 3),
+                event_kind=kind,
+                burst_count=len(self._recent_high_entropy),
+                burst_triggered=burst,
+            )
+        )

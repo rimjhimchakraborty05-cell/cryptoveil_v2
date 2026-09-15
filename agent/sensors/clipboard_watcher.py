@@ -1,114 +1,81 @@
-"""
-clipboard_watcher.py — Clipboard integrity sensor (hijack detection).
+"""Observe rapid changes between wallet-shaped clipboard values.
 
-Windows and macOS/Linux both use a polling loop here (a true native push
-notification would require a Win32 message-only window, out of scope for
-this reference build — see README "Explicit Limitations"). Windows polls
-faster than the documented 100ms macOS/Linux fallback cadence.
-
-Detection logic: whenever the clipboard changes we hash and record it, then
-re-check shortly after. If the content has silently changed *again* by the
-time we re-check — without the normal "content changed" tick firing in
-between — it's treated as a clipboard swap: the classic crypto-address
-hijack pattern where malware watches the clipboard for a wallet address and
-substitutes its own.
+This is a review signal, not attribution of an unauthorised writer. Ordinary
+clipboard contents are neither recorded nor hashed into the evidence ledger.
 """
+
 from __future__ import annotations
 
 import asyncio
 import hashlib
-import logging
-import sys
-from typing import Optional
+import re
+import time
+from contextlib import suppress
 
 import pyperclip
 
-from ..bus.event_bus import EventBroker
 from ..bus.events import ClipboardChangedEvent, ClipboardSwapEvent, EventSeverity
 
-log = logging.getLogger("cryptoveil.sensors.clipboard")
-
-WINDOWS_POLL_SECONDS = 0.25
-FALLBACK_POLL_SECONDS = 0.5
-RECHECK_DELAY_SECONDS = 0.6
-
-
-def _hash(content: str) -> str:
-    return hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()
+WALLET = re.compile(
+    r"(?:0x[0-9a-fA-F]{40}|bc1[ac-hj-np-z02-9]{25,87}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})\Z"
+)
 
 
 class ClipboardWatcher:
-    def __init__(self, broker: EventBroker) -> None:
+    def __init__(self, broker):
         self._broker = broker
-        self._last_hash: Optional[str] = None
-        self._task: Optional[asyncio.Task] = None
+        self._task = None
         self._running = False
-        self._interval = WINDOWS_POLL_SECONDS if sys.platform == "win32" else FALLBACK_POLL_SECONDS
+        self._last_hash = None
+        self._last_change = 0.0
+        self.status, self.last_error = "starting", None
 
-    def start(self) -> None:
+    def start(self):
         self._running = True
         self._task = asyncio.create_task(self._run())
-        log.info("ClipboardWatcher started (interval=%.2fs, platform=%s)", self._interval, sys.platform)
 
-    async def stop(self) -> None:
+    async def stop(self):
         self._running = False
         if self._task:
             self._task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._task
+        self.status = "stopped"
 
-    async def _run(self) -> None:
-        try:
-            self._last_hash = _hash(pyperclip.paste())
-        except Exception:
-            log.warning("Clipboard access unavailable on this platform/session — sensor idle")
-            return
-
+    async def _run(self):
         while self._running:
-            await asyncio.sleep(self._interval)
             try:
-                content = pyperclip.paste()
-            except Exception:
-                continue
-
-            current_hash = _hash(content)
-            if current_hash == self._last_hash:
-                continue
-
-            previous_hash = self._last_hash
-            self._last_hash = current_hash
-
-            await self._broker.publish(
-                ClipboardChangedEvent(
-                    content_hash=current_hash,
-                    content_length=len(content),
-                    previous_hash=previous_hash,
+                content = (await asyncio.to_thread(pyperclip.paste)).strip()
+                await self.observe(content, time.monotonic())
+                self.status, self.last_error = "active", None
+            except Exception:  # noqa: BLE001 - clipboard APIs differ by host
+                self.status, self.last_error = (
+                    "unavailable",
+                    "Clipboard access is unavailable in this session",
                 )
-            )
+                await asyncio.sleep(10)
+            await asyncio.sleep(0.5)
 
-            asyncio.create_task(self._recheck(current_hash))
-
-    async def _recheck(self, expected_hash: str) -> None:
-        """
-        If the clipboard content has moved on again to something new by the
-        time we recheck, and nothing else legitimately updated our tracked
-        hash in between, treat it as a hijack/swap.
-        """
-        await asyncio.sleep(RECHECK_DELAY_SECONDS)
-        try:
-            content = pyperclip.paste()
-        except Exception:
+    async def observe(self, content, now):
+        if not WALLET.fullmatch(content):
+            self._last_hash = None
             return
-
-        observed_hash = _hash(content)
-        if observed_hash == expected_hash:
-            return  # unchanged since we last recorded it — normal
-        if observed_hash == self._last_hash:
-            return  # a legitimate subsequent copy already updated state
-
+        current_hash = hashlib.sha256(content.encode()).hexdigest()
+        if current_hash == self._last_hash:
+            return
+        previous_hash = self._last_hash
+        previous_time = self._last_change
+        self._last_hash, self._last_change = current_hash, now
         await self._broker.publish(
-            ClipboardSwapEvent(
-                severity=EventSeverity.HIGH,
-                expected_hash=expected_hash,
-                observed_hash=observed_hash,
+            ClipboardChangedEvent(
+                content_hash=current_hash, content_length=len(content), previous_hash=previous_hash
             )
         )
-        self._last_hash = observed_hash
+        if previous_hash is not None and now - previous_time <= 2:
+            await self._broker.publish(
+                ClipboardSwapEvent(
+                    severity=EventSeverity.MEDIUM,
+                    expected_hash=previous_hash,
+                    observed_hash=current_hash,
+                )
+            )

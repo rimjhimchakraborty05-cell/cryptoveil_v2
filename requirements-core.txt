@@ -1,0 +1,9 @@
+fastapi>=0.115,<1
+uvicorn>=0.34,<1
+pydantic>=2.10,<3
+psutil>=5.9,<8
+watchdog>=4,<7
+cryptography>=44,<51
+pyperclip>=1.9,<2
+reportlab>=4.2,<5
+tzdata>=2025.1

@@ -1,133 +1,93 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=360, initial-scale=1.0"/>
-  <title>CryptoVeil</title>
-  <link rel="stylesheet" href="popup.css"/>
-</head>
-<body>
-  <div id="popup">
-
-    <!-- Header -->
-    <header id="popup-header">
-      <div class="header-brand">
-        <img src="icons/icon48.png" alt="CryptoVeil" class="header-icon"/>
-        <div>
-          <h1>CryptoVeil</h1>
-          <span class="subtitle">Real-Time Security</span>
-        </div>
-      </div>
-      <div class="conn-indicator" id="conn-status">
-        <div class="conn-dot"></div>
-        <span id="conn-text">OFFLINE</span>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>CryptoVeil</title>
+    <link rel="stylesheet" href="popup.css" />
+    <script src="popup.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <div class="mark" aria-hidden="true">C</div>
+      <div>
+        <h1>CryptoVeil</h1>
+        <p>Browser evidence, clearly.</p>
       </div>
     </header>
-
-    <!-- Monitored Account & Email Section -->
-    <section class="account-section" id="account-section">
-      <div class="account-header">
-        <div class="account-title">
-          <span class="account-icon">👤</span>
-          <span>MONITORED EMAIL ID</span>
+    <div id="connection" class="status" role="status">Checking connection…</div>
+    <form id="pair-form">
+      <h2>Pair with your application</h2>
+      <p>
+        In the app, choose <b>Connect browser</b> and generate a pairing code.
+      </p>
+      <label
+        >Browser name<input
+          id="browser-name"
+          value="My browser"
+          maxlength="60"
+          required
+          autocomplete="off" /></label
+      ><label
+        >One-use pairing code<input
+          id="pair-code"
+          placeholder="8-digit code"
+          inputmode="numeric"
+          pattern="[0-9]{8}"
+          maxlength="8"
+          required
+          autocomplete="off"
+      /></label>
+      <details>
+        <summary>Application address</summary>
+        <label
+          >Local app URL<input
+            id="app-url"
+            type="url"
+            value="http://127.0.0.1:8765"
+            required
+        /></label>
+      </details>
+      <button type="submit" id="pair-button">Pair with application</button>
+    </form>
+    <section id="paired-panel" hidden>
+      <h2 id="browser-label">Your browser</h2>
+      <div class="stats">
+        <div>
+          <strong id="queued">0</strong><span>Waiting to be saved</span>
         </div>
-        <button class="btn-change-account" id="btn-toggle-account-edit" title="Switch or select active browser email">Switch</button>
-      </div>
-      <div class="account-current" id="account-current-display">
-        <div class="account-email" id="acc-display-email">Detecting browser account…</div>
-        <div class="account-browser-badge" id="acc-display-browser">Auto</div>
-      </div>
-      
-      <!-- Account Picker Drawer (Collapsible) -->
-      <div class="account-picker" id="account-picker" style="display:none;">
-        <label class="picker-label" for="profile-select">Select Detected Browser Profile / Email:</label>
-        <select id="profile-select" class="popup-select">
-          <option value="">Scanning detected email IDs…</option>
-        </select>
-        <div class="custom-email-row" id="custom-email-row" style="display:none;margin-top:6px;">
-          <input type="email" id="custom-email-input" class="popup-input" placeholder="Or enter specific email address"/>
-        </div>
-        <div class="picker-actions">
-          <button class="btn-save-account" id="btn-save-account">Save Account</button>
-          <button class="btn-cancel-account" id="btn-cancel-account">Cancel</button>
+        <div>
+          <strong id="saved">—</strong><span>Latest evidence record</span>
         </div>
       </div>
+      <p id="delivery-note" class="note"></p>
+      <button id="retry-button" class="secondary">Retry delivery</button>
     </section>
-
-    <!-- Trust Score Section -->
-    <section class="score-section" id="score-section">
-      <div class="score-ring-container">
-        <svg viewBox="0 0 120 120" class="score-ring">
-          <circle class="ring-bg" cx="60" cy="60" r="52" />
-          <circle class="ring-fg" id="score-ring-fg" cx="60" cy="60" r="52" />
-        </svg>
-        <div class="score-value" id="score-value">—</div>
-      </div>
-      <div class="score-meta">
-        <div class="score-label">TRUST SCORE</div>
-        <div class="score-hostname" id="score-hostname">No site loaded</div>
-        <div class="score-verdict" id="score-verdict">—</div>
-      </div>
+    <section class="site">
+      <h2>Current website</h2>
+      <strong id="site-name">—</strong>
+      <p id="site-score">
+        Open an HTTP or HTTPS page to see a local risk estimate.
+      </p>
+      <ul id="site-reasons"></ul>
+      <p class="note">
+        A heuristic score is not a safety guarantee. Known AI service
+        connections are observations, not proof of a data leak.
+      </p>
     </section>
-
-    <!-- Reasons -->
-    <section class="reasons-section" id="reasons-section" style="display:none;">
-      <div class="section-label">RISK FACTORS</div>
-      <ul id="reasons-list"></ul>
-    </section>
-
-    <!-- Protection Toggles -->
-    <section class="toggles-section">
-      <div class="section-label">ACTIVE PROTECTIONS</div>
-      <div class="toggle-row">
-        <div class="toggle-info">
-          <span class="toggle-icon">🔒</span>
-          <span>Value Obfuscation</span>
-        </div>
-        <label class="toggle-switch">
-          <input type="checkbox" id="toggle-obfuscation" checked/>
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-      <div class="toggle-row">
-        <div class="toggle-info">
-          <span class="toggle-icon">👁</span>
-          <span>Visual Masking</span>
-        </div>
-        <label class="toggle-switch">
-          <input type="checkbox" id="toggle-masking"/>
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-      <div class="toggle-row">
-        <div class="toggle-info">
-          <span class="toggle-icon">🤖</span>
-          <span>Shadow AI Monitor</span>
-        </div>
-        <label class="toggle-switch">
-          <input type="checkbox" id="toggle-shadowai" checked/>
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-    </section>
-
-    <!-- Recent Alerts -->
-    <section class="alerts-section">
-      <div class="section-label">RECENT ALERTS</div>
-      <div id="alerts-list">
-        <div class="empty-alerts">No alerts this session</div>
-      </div>
-    </section>
-
-    <!-- Footer -->
+    <label class="toggle"
+      ><input id="mask-toggle" type="checkbox" /><span
+        >Visually hide sensitive fields<small
+          >Hides text on screen. Does not stop page scripts reading it.</small
+        ></span
+      ></label
+    >
+    <p id="message" role="alert"></p>
+    <button id="open-app" class="secondary full">
+      Open CryptoVeil application ↗
+    </button>
     <footer>
-      <button class="btn-dashboard" id="btn-dashboard">
-        <span>📊</span> Open Dashboard
-      </button>
-      <div class="footer-version">v2.0.0</div>
+      No form values, passwords or URL query strings are collected.
     </footer>
-
-  </div>
-  <script src="popup.js"></script>
-</body>
+  </body>
 </html>
