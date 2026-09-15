@@ -1,40 +1,33 @@
 {
   "manifest_version": 3,
   "name": "CryptoVeil",
-  "version": "2.0.0",
-  "description": "Real-time browser security: trust scoring, data obfuscation, Shadow AI detection, and endpoint telemetry bridge.",
-  "permissions": [
-    "webNavigation",
-    "webRequest",
-    "storage",
-    "tabs",
-    "scripting",
-    "activeTab",
-    "notifications",
-    "alarms"
-  ],
-  "host_permissions": [
-    "<all_urls>"
-  ],
-  "background": {
-    "service_worker": "background.js",
-    "type": "module"
-  },
+  "version": "2.1.0",
+  "minimum_chrome_version": "120",
+  "description": "Paired browser evidence collection, website risk hints, optional visual masking and verifiable daily records.",
+  "permissions": ["webNavigation", "webRequest", "storage", "alarms"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": ["http://*/*", "https://*/*"],
+      "exclude_matches": ["http://127.0.0.1/*", "http://localhost/*"],
       "js": ["content.js"],
       "run_at": "document_start",
       "all_frames": false
     }
   ],
   "action": {
-    "default_title": "CryptoVeil Security",
-    "default_popup": "popup.html"
+    "default_title": "CryptoVeil",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "icons": {
-    "16":  "icons/icon16.png",
-    "48":  "icons/icon48.png",
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   }
 }

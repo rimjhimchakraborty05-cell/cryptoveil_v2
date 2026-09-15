@@ -1,174 +1,110 @@
-"""
-desktop_app.py — CryptoVeil v2 Native Desktop Application.
+"""Native desktop window with a gracefully stopped, loopback-only backend."""
 
-Runs the CryptoVeil cybersecurity and forensics suite inside a native Windows/macOS/Linux
-desktop application window using pywebview (Edge WebView2 on Windows) with full native
-window controls and zero browser URL bars.
-"""
 from __future__ import annotations
 
-import asyncio
+import json
+import logging
 import multiprocessing
 import os
 import socket
-import sys
 import threading
 import time
 import urllib.request
 import webbrowser
 
-# ── PyInstaller Windows Multiprocessing Support ───────────────────────────
-multiprocessing.freeze_support()
-
-# ── Ensure Project Root is in sys.path ───────────────────────────────────
-PROJECT_ROOT = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
-
-# ── Force UTF-8 on Windows console ───────────────────────────────────────
-if sys.platform == "win32":
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-    except AttributeError:
-        pass
-    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
-
 import uvicorn
-from agent.server.main import app
 
-PORT = int(os.environ.get("CRYPTOVEIL_PORT", "8765"))
-HOST = os.environ.get("CRYPTOVEIL_HOST", "127.0.0.1")
-
-
-def get_log_path() -> str:
-    if getattr(sys, "frozen", False):
-        base = os.path.dirname(sys.executable)
-    else:
-        base = PROJECT_ROOT
-    return os.path.join(base, "desktop_app.log")
-
-
-def log_msg(msg: str):
-    try:
-        with open(get_log_path(), "a", encoding="utf-8") as f:
-            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
-    except Exception:
-        pass
+log = logging.getLogger("cryptoveil.desktop")
 
 
 def is_server_healthy(port: int) -> bool:
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1.0) as resp:
-            return resp.status == 200
-    except Exception:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1) as response:
+            data = json.load(response)
+            return (
+                isinstance(data, dict)
+                and data.get("service") == "cryptoveil-agent"
+                and data.get("version") == "2.1.0"
+            )
+    except (OSError, ValueError):
         return False
 
 
-def is_port_in_use(port: int) -> bool:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.settimeout(0.3)
-        return s.connect_ex(("127.0.0.1", port)) == 0
+def main() -> None:
+    from agent.server.main import app, default_data_dir
 
-
-import subprocess
-
-def start_backend():
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        config = uvicorn.Config(
-            app=app,
-            host="127.0.0.1" if HOST in ("127.0.0.1", "localhost") else "0.0.0.0",
-            port=PORT,
-            reload=False,
-            log_level="warning",
-            log_config=None,
-            loop="asyncio",
-        )
-        server = uvicorn.Server(config)
-        server.install_signal_handlers = lambda: None
-        loop.run_until_complete(server.serve())
-    except Exception as e:
-        import traceback
-        log_msg(f"Background backend error: {e}\n{traceback.format_exc()}")
-
-
-def wait_for_server(port: int, timeout: float = 15.0) -> bool:
-    start = time.time()
-    while time.time() - start < timeout:
-        if is_server_healthy(port):
-            return True
-        time.sleep(0.2)
-    return False
-
-
-def main():
-    log_msg("=== CryptoVeil Desktop App Starting ===")
-    backend_proc = None
-
-    # If backend not responding, start backend server
-    if not is_server_healthy(PORT):
-        log_msg(f"Initializing Core Security Engine on port {PORT}...")
-        if getattr(sys, "frozen", False):
-            server_thread = threading.Thread(target=start_backend, daemon=True)
-            server_thread.start()
-        else:
-            run_py = os.path.join(PROJECT_ROOT, "run.py")
-            flags = 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW
-            try:
-                backend_executable = sys.executable.replace("pythonw.exe", "python.exe")
-                backend_proc = subprocess.Popen(
-                    [backend_executable, run_py, "--server"],
-                    cwd=PROJECT_ROOT,
-                    creationflags=flags,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
+    data_dir = os.environ.get("CRYPTOVEIL_DATA_DIR", str(default_data_dir()))
+    os.makedirs(data_dir, exist_ok=True)
+    logging.basicConfig(
+        filename=os.path.join(data_dir, "desktop_app.log"),
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    port = int(os.environ.get("CRYPTOVEIL_PORT", "8765"))
+    server = None
+    thread = None
+    if not is_server_healthy(port):
+        with socket.socket() as probe:
+            if probe.connect_ex(("127.0.0.1", port)) == 0:
+                raise RuntimeError(
+                    f"Port {port} is in use by another application or an older CryptoVeil. Close it before starting this version."
                 )
-                log_msg(f"Backend process spawned (PID: {backend_proc.pid}).")
-            except Exception as e:
-                log_msg(f"Failed to spawn backend subprocess: {e}. Falling back to thread.")
-                server_thread = threading.Thread(target=start_backend, daemon=True)
-                server_thread.start()
-        
-        log_msg(f"Waiting for backend health check on port {PORT}...")
-        if not wait_for_server(PORT, timeout=15.0):
-            log_msg(f"[ERROR] Server failed to become healthy on port {PORT} within timeout.")
-            if not is_port_in_use(PORT):
-                log_msg("[FATAL] Port 8765 is not listening.")
-    else:
-        log_msg(f"Connected to active Core Engine on port {PORT}.")
-
-    app_url = f"http://127.0.0.1:{PORT}/dashboard/index.html"
-    log_msg(f"Opening GUI pointing to {app_url}...")
-
-    # Open native pywebview window
-    try:
-        import webview
-        log_msg("Creating pywebview native desktop window...")
-        window = webview.create_window(
-            title="CryptoVeil — Security Operations Desktop Application",
-            url=app_url,
-            width=1360,
-            height=880,
-            min_size=(1024, 680),
-            background_color="#050811",
-            text_select=True,
+        server = uvicorn.Server(
+            uvicorn.Config(
+                app,
+                host="127.0.0.1",
+                port=port,
+                loop="asyncio",
+                log_config=None,
+                log_level="warning",
+            )
         )
-        webview.start(debug=False)
-        log_msg("Desktop application window closed normally.")
-    except Exception as e:
-        log_msg(f"Native window GUI error ({e}). Falling back to default browser...")
-        webbrowser.open(app_url)
+        thread = threading.Thread(target=server.run, name="CryptoVeil backend", daemon=False)
+        thread.start()
+        deadline = time.monotonic() + 30
+        while not is_server_healthy(port):
+            if not thread.is_alive() or time.monotonic() >= deadline:
+                server.should_exit = True
+                thread.join(timeout=5)
+                raise RuntimeError(
+                    f"CryptoVeil could not start. See {data_dir}/desktop_app.log for details."
+                )
+            time.sleep(0.15)
+    app_url = f"http://127.0.0.1:{port}/dashboard/"
+    try:
+        try:
+            import webview
+
+            webview.settings["ALLOW_DOWNLOADS"] = True
+            webview.settings["ALLOW_FILE_URLS"] = False
+            webview.create_window(
+                "CryptoVeil - Security & Evidence",
+                app_url,
+                width=1360,
+                height=900,
+                min_size=(860, 640),
+                background_color="#f5f6f3",
+                text_select=True,
+            )
+            webview.start(debug=False)
+        except Exception:
+            log.exception("Native window unavailable; using the local browser view")
+            webbrowser.open(app_url)
+            if thread:
+                print(
+                    f"CryptoVeil is running at {app_url}. Press Ctrl+C to stop after saving reports."
+                )
+                while thread.is_alive():
+                    thread.join(timeout=0.5)
+    except KeyboardInterrupt:
+        pass
     finally:
-        if backend_proc is not None:
-            try:
-                log_msg("Terminating backend process on desktop app exit...")
-                backend_proc.terminate()
-            except Exception:
-                pass
-        log_msg("CryptoVeil exited cleanly.")
+        if server:
+            # Give lifespan shutdown time to drain writes, seal the tail and
+            # save the final daily report. Never terminate the writer abruptly.
+            server.should_exit = True
+            if thread:
+                thread.join()
 
 
 if __name__ == "__main__":

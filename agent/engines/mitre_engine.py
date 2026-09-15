@@ -8,6 +8,7 @@ per README), and publishes MitreAlertEvent for any match.
 Also maintains an in-memory process ancestry graph (nodes + edges) for the
 dashboard's live graph panel and the GET /api/process/graph endpoint.
 """
+
 from __future__ import annotations
 
 import json
@@ -44,7 +45,7 @@ class MitreEngine:
         self.reload_rules()
 
     def reload_rules(self) -> None:
-        with open(self._rules_path, "r", encoding="utf-8") as f:
+        with open(self._rules_path, encoding="utf-8") as f:
             data = json.load(f)
         self._rules = data.get("rules", [])
         log.info("MitreEngine loaded %d rules from %s", len(self._rules), self._rules_path)
@@ -110,21 +111,20 @@ class MitreEngine:
 
         if "parent_name_not_in" in conditions:
             excluded = {v.lower() for v in conditions["parent_name_not_in"]}
-            if parent in excluded:
+            if not parent or parent in excluded:
                 return False
 
         if "exe_path_not_contains" in conditions:
             # Masquerading rule: the exe path must NOT contain any of the
             # expected system directories for this to be a match.
             expected_substrings = conditions["exe_path_not_contains"]
-            if any(sub.lower() in exe_path for sub in expected_substrings):
+            if not exe_path or any(sub.lower() in exe_path for sub in expected_substrings):
                 return False
 
-        if "cmdline_regex" in conditions:
-            if not re.search(conditions["cmdline_regex"], cmdline, re.IGNORECASE):
-                return False
-
-        return True
+        return (
+            "cmdline_regex" not in conditions
+            or re.search(conditions["cmdline_regex"], cmdline, re.IGNORECASE) is not None
+        )
 
     def graph(self) -> dict:
         return {"nodes": list(self._graph_nodes.values()), "edges": self._graph_edges}

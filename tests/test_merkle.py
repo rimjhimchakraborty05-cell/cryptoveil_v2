@@ -4,6 +4,7 @@ test_merkle.py — 12 unit tests for agent/forensics/merkle_tree.py
 Run directly:
     python tests/test_merkle.py
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -13,7 +14,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from agent.forensics.merkle_tree import (  # noqa: E402
+from agent.forensics.merkle_tree import (
     InclusionProof,
     MerkleTree,
     leaf_hash,
@@ -80,9 +81,7 @@ class TestMerkleTree(unittest.TestCase):
         tree.add_leaf(b"only-leaf")
         proof = tree.inclusion_proof(0)
         self.assertEqual(proof.audit_path, [])
-        self.assertTrue(
-            MerkleTree.verify_inclusion_proof(b"only-leaf", proof, tree.root_hex())
-        )
+        self.assertTrue(MerkleTree.verify_inclusion_proof(b"only-leaf", proof, tree.root_hex()))
 
     # 9
     def test_inclusion_proof_verifies_for_every_index_pow2_tree(self):
@@ -117,9 +116,7 @@ class TestMerkleTree(unittest.TestCase):
             tree.add_leaf(leaf)
         root_hex = tree.root_hex()
         proof = tree.inclusion_proof(4)
-        self.assertFalse(
-            MerkleTree.verify_inclusion_proof(b"evt-4-TAMPERED", proof, root_hex)
-        )
+        self.assertFalse(MerkleTree.verify_inclusion_proof(b"evt-4-TAMPERED", proof, root_hex))
 
     # 12
     def test_tampered_audit_path_entry_fails_verification(self):

@@ -10,12 +10,14 @@ Anti-forensic detection (log clearing, shadow-copy deletion, journal wiping,
 etc.) is evaluated inline on every spawned process and published as its own
 always-critical AntiForensicEvent, so it is never masked by a MITRE rule miss.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
-from typing import Optional
+from contextlib import suppress
 
 import psutil
 
@@ -52,8 +54,9 @@ class ProcessWatcher:
         self._broker = broker
         self._interval = poll_interval
         self._known: dict[int, dict] = {}
-        self._task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
         self._running = False
+        self.status, self.last_error = "starting", None
 
     def start(self) -> None:
         self._running = True
@@ -64,71 +67,89 @@ class ProcessWatcher:
         self._running = False
         if self._task:
             self._task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._task
+        self.status = "stopped"
 
-    async def _run(self) -> None:
-        # Prime the known-process table so already-running processes at
-        # startup don't all fire spurious "spawn" events.
-        for p in psutil.process_iter(["pid", "name"]):
-            self._known[p.pid] = {"name": p.info.get("name", "")}
-
-        while self._running:
-            try:
-                await self._poll_once()
-            except Exception:
-                log.exception("ProcessWatcher poll failed")
-            await asyncio.sleep(self._interval)
-
-    async def _poll_once(self) -> None:
-        current_pids: set[int] = set()
-
+    @staticmethod
+    def _snapshot() -> dict[int, dict]:
+        result = {}
         for proc in psutil.process_iter(
             ["pid", "ppid", "name", "exe", "cmdline", "username", "create_time"]
         ):
-            info = proc.info
-            pid = info["pid"]
-            current_pids.add(pid)
+            try:
+                result[proc.pid] = proc.info
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return result
 
-            if pid in self._known:
-                continue  # already seen — not a new spawn
+    async def _run(self) -> None:
+        try:
+            snapshot = await asyncio.to_thread(self._snapshot)
+            self._known = {
+                pid: {"name": info.get("name", ""), "create_time": info.get("create_time")}
+                for pid, info in snapshot.items()
+            }
+            self.status = "active"
+        except Exception as exc:  # noqa: BLE001 - sensor failure must not stop monitoring
+            self.status, self.last_error = "unavailable", str(exc)
+        while self._running:
+            try:
+                await self._poll_once()
+                self.status, self.last_error = "active", None
+            except Exception as exc:
+                self.status, self.last_error = "unavailable", str(exc)
+                log.exception("Process observations unavailable")
+            await asyncio.sleep(self._interval)
 
+    async def _poll_once(self) -> None:
+        snapshot = await asyncio.to_thread(self._snapshot)
+        for pid, info in snapshot.items():
+            previous = self._known.get(pid)
+            if previous and previous.get("create_time") == info.get("create_time"):
+                continue
+            if previous:
+                await self._broker.publish(
+                    ProcessTerminatedEvent(pid=pid, name=previous.get("name", ""))
+                )
             name = info.get("name") or ""
-            exe = info.get("exe") or ""
             cmdline = " ".join(info.get("cmdline") or [])
             ppid = info.get("ppid") or 0
-
-            parent_name, parent_exe = "", ""
-            try:
-                parent = psutil.Process(ppid)
-                parent_name = parent.name()
-                parent_exe = parent.exe()
-            except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError):
-                pass
-
-            self._known[pid] = {"name": name}
-
+            parent = snapshot.get(ppid, {})
             await self._broker.publish(
                 ProcessSpawnedEvent(
                     pid=pid,
                     name=name,
-                    exe=exe,
+                    exe=info.get("exe") or "",
                     cmdline=cmdline,
                     ppid=ppid,
-                    parent_name=parent_name,
-                    parent_exe=parent_exe,
+                    parent_name=parent.get("name") or "",
+                    parent_exe=parent.get("exe") or "",
                     username=info.get("username") or "",
                     create_time=info.get("create_time") or time.time(),
                 )
             )
-
+            self._known[pid] = {"name": name, "create_time": info.get("create_time")}
             await self._check_anti_forensic(pid, name, cmdline)
-
-        terminated = set(self._known) - current_pids
-        for pid in terminated:
-            name = self._known.pop(pid, {}).get("name", "")
-            await self._broker.publish(ProcessTerminatedEvent(pid=pid, name=name))
+        for pid in set(self._known) - set(snapshot):
+            old = self._known.pop(pid)
+            await self._broker.publish(ProcessTerminatedEvent(pid=pid, name=old.get("name", "")))
 
     async def _check_anti_forensic(self, pid: int, name: str, cmdline: str) -> None:
-        haystack = cmdline.lower()
+        if name.lower() not in {
+            "wevtutil.exe",
+            "vssadmin.exe",
+            "fsutil.exe",
+            "cipher.exe",
+            "wbadmin.exe",
+            "bcdedit.exe",
+            "cmd.exe",
+            "powershell.exe",
+            "pwsh.exe",
+        }:
+            return
+        haystack = re.sub(r"\.exe\b", "", cmdline.lower()).replace('"', "")
+        haystack = re.sub(r"\s+", " ", haystack)
         for pattern, description in ANTI_FORENSIC_PATTERNS.items():
             if pattern in haystack:
                 await self._broker.publish(

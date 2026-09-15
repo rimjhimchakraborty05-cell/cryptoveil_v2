@@ -13,6 +13,7 @@ crafting a leaf whose hash collides with an internal node's hash — the
 classic Merkle "second preimage" forgery that RFC 6962 exists specifically
 to close.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -106,13 +107,35 @@ class MerkleTree:
         Recompute the root from a leaf + its audit path and compare against
         the expected root. Self-contained — does not need the full tree.
         """
-        recomputed = _rebuild_root(
-            leaf_hash(leaf_data),
-            proof.leaf_index,
-            proof.tree_size,
-            [bytes.fromhex(h) for h in proof.audit_path],
-        )
-        return recomputed.hex() == expected_root_hex
+        # Reject impossible positions and both missing and surplus siblings.
+        # Otherwise a one-leaf proof can "prove" membership at any index.
+        if (
+            type(proof.leaf_index) is not int
+            or type(proof.tree_size) is not int
+            or not isinstance(proof.audit_path, list)
+            or not (0 <= proof.leaf_index < proof.tree_size <= 2**63)
+        ):
+            return False
+        index, size, expected_length = proof.leaf_index, proof.tree_size, 0
+        while size > 1:
+            k = _largest_power_of_two_less_than(size)
+            if index < k:
+                size = k
+            else:
+                index, size = index - k, size - k
+            expected_length += 1
+        if len(proof.audit_path) != expected_length:
+            return False
+        try:
+            path = [bytes.fromhex(h) for h in proof.audit_path]
+            if len(bytes.fromhex(expected_root_hex)) != 32 or any(len(h) != 32 for h in path):
+                return False
+            recomputed = _rebuild_root(
+                leaf_hash(leaf_data), proof.leaf_index, proof.tree_size, path
+            )
+            return recomputed.hex() == expected_root_hex.lower()
+        except (ValueError, TypeError, IndexError):
+            return False
 
 
 def _rebuild_root(leaf: bytes, index: int, size: int, path: list[bytes]) -> bytes:

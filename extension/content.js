@@ -1,145 +1,140 @@
-/**
- * content.js — CryptoVeil DOM Security Layer
- *
- * Injected at document_start (before any page script runs) to guarantee
- * that our hooks are in place before third-party scripts can read form fields.
- *
- * Active protections:
- *   1. VALUE OBFUSCATION  — intercepts the HTMLInputElement.value getter so
- *      any third-party script reading .value from a sensitive field receives
- *      a reversible HMAC-derived token instead of the real value.
- *      Swapped back to the real value only at legitimate form submission.
- *
- *   2. VISUAL MASKING     — replaces on-screen characters with • on low-trust
- *      sites, while the underlying DOM value stays intact.
- *
- *   3. SHADOW AI MONITOR (DOM pass) — MutationObserver watching for injected
- *      <iframe> elements whose hostname is a known AI tool domain.
- */
-
-(function cryptoveil_content() {
-  'use strict';
-
-  // ── Config ──────────────────────────────────────────────────────────────
-  const SENSITIVE_TYPES = new Set(['password', 'email', 'tel', 'credit-card']);
-  const SENSITIVE_NAMES = /password|passwd|pwd|credit.?card|ccv|cvv|ssn|account|token|secret/i;
-
-  const AI_IFRAME_DOMAINS = [
-    'sider.ai','merlin.foyer.work','monica.im','chatgpt.com',
-    'claude.ai','perplexity.ai','you.com','phind.com',
-    'harpa.ai','openai.com',
+/* Visual masking and observation only. Never override .value or change submitted data. */
+(() => {
+  "use strict";
+  const sensitiveName =
+    /password|passwd|credit.?card|cvv|cvc|ssn|secret|token/i;
+  const aiDomains = [
+    "chatgpt.com",
+    "claude.ai",
+    "perplexity.ai",
+    "sider.ai",
+    "merlin.foyer.work",
+    "monica.im",
+    "harpa.ai",
   ];
-
-  let trustScore       = 100;
-  let maskingActive    = false;
-  const realValues     = new WeakMap(); // input el → real value
-  const hookedInputs   = new WeakSet();
-
-  // ── Communicate with background SW ────────────────────────────────────
-  function sendDomEvent(payload) {
-    chrome.runtime.sendMessage({type: 'cv_dom_event', payload}).catch(()=>{});
-  }
-
-  // ── Sensitive field detection ──────────────────────────────────────────
-  function isSensitive(el) {
-    if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return false;
-    if (SENSITIVE_TYPES.has(el.type)) return true;
-    if (el.name && SENSITIVE_NAMES.test(el.name)) return true;
-    if (el.id   && SENSITIVE_NAMES.test(el.id))   return true;
-    if (el.autocomplete && SENSITIVE_NAMES.test(el.autocomplete)) return true;
-    return false;
-  }
-
-  // ── Value obfuscation — installed at document_start ──────────────────
-  function hookInput(el) {
-    if (hookedInputs.has(el)) return;
-    hookedInputs.add(el);
-    realValues.set(el, el.value);
-
-    const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
-                    || Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
-    const origGetter = descriptor?.get;
-    const origSetter = descriptor?.set;
-
-    Object.defineProperty(el, 'value', {
-      get() {
-        const caller = new Error().stack || '';
-        // Allow the page's own submit handlers (rough heuristic: same origin)
-        if (caller.includes('submit') || caller.includes('onsubmit')) {
-          return realValues.get(el) ?? origGetter?.call(el) ?? '';
-        }
-        // Return obfuscated token for all other reads
-        const real = realValues.get(el) ?? origGetter?.call(el) ?? '';
-        if (!real) return real;
-        sendDomEvent({type:'obfuscation_triggered', fieldName: el.name || el.id});
-        return `cv_tok_${btoa(el.name || 'field').slice(0,8)}`;
-      },
-      set(v) {
-        realValues.set(el, v);
-        origSetter?.call(el, maskingActive ? '•'.repeat(v.length) : v);
-      },
-      configurable: true,
-    });
-
-    el.addEventListener('focus', () => {
-      sendDomEvent({type:'sensitive_field_used', fieldName: el.name || el.id});
-    }, {once: true});
-  }
-
-  // ── Masking (visual) ──────────────────────────────────────────────────
-  function applyMasking(el) {
-    if (!isSensitive(el)) return;
-    const real = el.value;
-    realValues.set(el, real);
-    el.value = '•'.repeat(real.length);
-  }
-
-  function enableMasking() {
-    maskingActive = true;
-    document.querySelectorAll('input, textarea').forEach(el => {
-      if (isSensitive(el)) applyMasking(el);
-    });
-    sendDomEvent({type:'masking_activated', hostname: location.hostname});
-  }
-
-  // ── Shadow AI DOM pass ────────────────────────────────────────────────
-  function checkIframe(el) {
-    if (!(el instanceof HTMLIFrameElement)) return;
-    let src = el.src || el.getAttribute('src') || '';
-    let hostname = '';
-    try { hostname = new URL(src).hostname; } catch(_) { return; }
-    if (AI_IFRAME_DOMAINS.some(d => hostname === d || hostname.endsWith('.'+d))) {
-      sendDomEvent({type:'shadow_ai_iframe', aiDomain: hostname, src});
+  const seen = new WeakSet(),
+    iframes = new WeakSet(),
+    originalStyles = new WeakMap();
+  let masked = false,
+    banner = null;
+  const isSensitive = (element) =>
+    (element instanceof HTMLInputElement ||
+      element instanceof HTMLTextAreaElement) &&
+    (["password", "email", "tel"].includes(element.type) ||
+      sensitiveName.test(
+        `${element.name} ${element.id} ${element.autocomplete}`,
+      ));
+  const send = (payload) =>
+    chrome.runtime
+      .sendMessage({ type: "cv_dom_event", payload })
+      .catch(() => {});
+  function styleField(element, active) {
+    if (!isSensitive(element)) return;
+    if (active) {
+      if (!originalStyles.has(element))
+        originalStyles.set(element, {
+          value: element.style.getPropertyValue("-webkit-text-security"),
+          priority: element.style.getPropertyPriority("-webkit-text-security"),
+        });
+      element.style.setProperty("-webkit-text-security", "disc", "important");
+    } else if (originalStyles.has(element)) {
+      const old = originalStyles.get(element);
+      if (old.value)
+        element.style.setProperty(
+          "-webkit-text-security",
+          old.value,
+          old.priority,
+        );
+      else element.style.removeProperty("-webkit-text-security");
+      originalStyles.delete(element);
     }
   }
-
-  const mo = new MutationObserver(mutations => {
-    for (const m of mutations) {
-      for (const node of m.addedNodes) {
-        if (node.nodeType !== 1) continue;
-        checkIframe(node);
-        if (isSensitive(node)) hookInput(node);
-        node.querySelectorAll?.('iframe, input, textarea')
-            .forEach(el => { checkIframe(el); if(isSensitive(el)) hookInput(el); });
+  function setMasking(active, report = true) {
+    masked = Boolean(active);
+    document
+      .querySelectorAll("input,textarea")
+      .forEach((el) => styleField(el, masked));
+    if (report)
+      send({ type: masked ? "masking_activated" : "masking_deactivated" });
+  }
+  function inspect(element) {
+    if (isSensitive(element) && !seen.has(element)) {
+      seen.add(element);
+      styleField(element, masked);
+      element.addEventListener(
+        "focus",
+        () =>
+          send({
+            type: "sensitive_field_used",
+            field_type: element.type || "textarea",
+          }),
+        { once: true },
+      );
+    }
+    if (element instanceof HTMLIFrameElement && !iframes.has(element)) {
+      let host;
+      try {
+        host = new URL(element.src, location.href).hostname;
+      } catch {
+        return;
+      }
+      if (aiDomains.some((d) => host === d || host.endsWith(`.${d}`))) {
+        iframes.add(element);
+        send({ type: "shadow_ai_iframe", ai_domain: host });
       }
     }
-  });
-  mo.observe(document.documentElement, {childList: true, subtree: true});
-
-  // Hook already-present inputs
-  document.querySelectorAll('input, textarea').forEach(el => {
-    if (isSensitive(el)) hookInput(el);
-  });
-
-  // ── Listen for trust score updates from background ────────────────────
-  chrome.runtime.onMessage.addListener(msg => {
-    if (msg.type === 'cv_trust_update') {
-      trustScore = msg.score;
-      if (trustScore < 50 && !maskingActive) enableMasking();
-    }
-    if (msg.type === 'cv_screen_share' && msg.active && !maskingActive) {
-      enableMasking();
+  }
+  function inspectTree(root) {
+    if (root.nodeType === 1) inspect(root);
+    root.querySelectorAll?.("input,textarea,iframe").forEach(inspect);
+  }
+  const observer = new MutationObserver((changes) => {
+    for (const change of changes) {
+      if (change.type === "attributes") inspect(change.target);
+      else for (const added of change.addedNodes) inspectTree(added);
     }
   });
-
+  observer.observe(document, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["type", "src"],
+  });
+  inspectTree(document);
+  function warning(reasons) {
+    if (banner || !document.documentElement) return;
+    banner = document.createElement("div");
+    const shadow = banner.attachShadow({ mode: "closed" });
+    const panel = document.createElement("div");
+    panel.setAttribute("role", "alert");
+    panel.style.cssText =
+      "position:fixed;top:12px;right:12px;max-width:350px;z-index:2147483647;background:#fff6e5;color:#513c16;border:1px solid #d8b979;border-radius:10px;padding:16px;font:13px/1.5 system-ui;box-shadow:0 4px 20px #0002";
+    const title = document.createElement("strong");
+    title.textContent = "CryptoVeil: check this website";
+    const message = document.createElement("p");
+    message.textContent =
+      reasons.join(" ") ||
+      "Review the website address before entering sensitive information.";
+    const close = document.createElement("button");
+    close.textContent = "Dismiss";
+    close.style.cssText =
+      "border:1px solid #c7b994;background:white;border-radius:5px;padding:5px 12px;color:#513c16;cursor:pointer";
+    close.addEventListener("click", () => banner.remove());
+    panel.append(title, message, close);
+    shadow.append(panel);
+    document.documentElement.append(banner);
+  }
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg.type === "cv_masking") setMasking(msg.active);
+    if (msg.type === "cv_trust_update" && msg.score < 65)
+      warning(msg.reasons || []);
+  });
+  chrome.runtime
+    .sendMessage({ type: "cv_get_page_settings" })
+    .then((settings) => {
+      if (!settings || settings.error) return;
+      setMasking(settings.masking, false);
+      if (settings.score < 65) warning(settings.reasons || []);
+    })
+    .catch(() => {});
 })();
