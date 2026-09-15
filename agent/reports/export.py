@@ -48,12 +48,15 @@ def to_csv_bytes(report: dict) -> bytes:
             "Host/process",
             "Original hash",
             "Next step",
+            "Browser profile",
+            "Account email label",
+            "Account label source",
         ]
     )
     for e in report["evidence_index"]:
         writer.writerow(
             [
-                safe_cell(e[k])
+                safe_cell(e.get(k))
                 for k in (
                     "seq",
                     "timestamp",
@@ -62,6 +65,9 @@ def to_csv_bytes(report: dict) -> bytes:
                     "hostname",
                     "hash",
                     "next_step",
+                    "browser_name",
+                    "account_email",
+                    "account_source",
                 )
             ]
         )
@@ -143,8 +149,37 @@ def to_pdf_bytes(report: dict) -> bytes:
     ):
         story.append(para(label, "CVHeading"))
         table(
-            [[k.replace("_", " ").capitalize(), v] for k, v in report[key].items()],
+            [
+                [k.replace("_", " ").capitalize(), v]
+                for k, v in report[key].items()
+                if not isinstance(v, (list, dict))
+            ],
             [doc.width * 0.65, doc.width * 0.35],
+        )
+    profiles = report["browser_security"].get("profiles", [])
+    if profiles:
+        story.append(para("Browser profiles observed", "CVHeading"))
+        table(
+            [["Browser", "Account label", "Source"]]
+            + [
+                [
+                    p.get("browser_name") or p.get("browser_family", "Browser"),
+                    p.get("account_email") or "Not shared",
+                    {
+                        "browser_profile": "Reported by browser",
+                        "user_provided": "Manual, unverified",
+                        "unavailable": "Unavailable",
+                    }.get(p.get("account_source"), "Not shared"),
+                ]
+                for p in profiles[:50]
+            ],
+            [doc.width * 0.28, doc.width * 0.47, doc.width * 0.25],
+            header=True,
+        )
+        story.append(
+            para(
+                "Account labels describe the paired profile and are not authenticated identity claims. Full profile history is retained in JSON."
+            )
         )
     integrity = report["forensic_integrity"]
     integrity_block = [

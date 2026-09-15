@@ -1,4 +1,4 @@
-# CryptoVeil v2.1
+# CryptoVeil v2.2
 
 CryptoVeil is a local endpoint and browser evidence collector. It gives a
 non-technical user a small dashboard, while preserving a verifiable
@@ -38,6 +38,16 @@ An HTTPS collector or object-storage API is not implemented by this backend.
   Reports. It shows plain-language next steps instead of a dense SOC wall.
 - Host sensors are best-effort and expose their health state. A sensor failure
   is visible without making the forensic ledger pretend it collected data.
+- Windows process-start notifications complement filesystem push events and
+  sampled exit reconciliation; unavailable Windows notifications produce a
+  visible sampling fallback. Linked findings connect LotL indicators, encryption
+  bursts and recent browser AI observations for review.
+- The dashboard receives live change notifications after storage. Browser
+  profiles can optionally attach a browser-reported or manually entered email
+  label; previously queued evidence keeps its original identity context.
+
+See [architecture, project abstract and security boundaries](docs/ARCHITECTURE.md)
+for the real-time pipeline, Shadow AI limitations and precise integrity claims.
 
 ## Quick start
 
@@ -65,6 +75,13 @@ The popup shows whether the application is online, how many observations are
 queued, the last durable receipt, and whether collection has been paused by an
 integrity failure.
 
+Pair each Chrome or Edge profile separately. Your choice of search engine does
+not affect collection. In **Connected browser and account**, optionally choose
+**Use browser profile email**, or enter a manual email label. The email is added
+to future evidence and reports only after this choice. Manual labels are not
+verified sign-in; no inbox access is requested. **Stop sharing account email**
+removes the optional permissions; previously saved evidence retains its labels.
+
 ## Evidence and integrity files
 
 The data directory is configurable with `CRYPTOVEIL_DATA_DIR` (default:
@@ -88,7 +105,9 @@ data/
 
 For a recorded event, the ledger stores the event, its sequence number, the
 previous entry hash, and the current entry hash. Every checkpoint stores the
-Merkle leaves and root, and is signed over all checkpoint metadata. A proof for
+Merkle leaves and root. Version-3 checkpoints sign a compact header whose root
+commits to the leaves; version-2 checkpoints retain their original signatures.
+A compact proof for
 one sequence can be verified independently with the trusted public key:
 
 ```text

@@ -243,6 +243,45 @@ def test_proof_rejects_untrusted_signer_and_metadata_change(audit):
     assert not audit.verify_proof(forged, audit.public_key)["valid"]
 
 
+@pytest.mark.parametrize("count", [1, 5, 65])
+def test_new_proofs_use_a_compact_signed_header(tmp_path, count):
+    audit = AuditLogger(
+        EventBroker(), tmp_path / "data", EvidenceArchive(tmp_path / "archive"), 128
+    )
+    for i in range(count):
+        audit.record(event(i))
+    proof = audit.get_proof(count - 1)
+    assert proof["checkpoint"]["schema_version"] == 3
+    assert "leaves" not in proof["checkpoint"]
+    assert len(proof["audit_path"]) <= (count - 1).bit_length()
+    assert len(canonical(proof["checkpoint"])) < 1200
+    assert audit.verify_proof(proof, audit.public_key)["valid"]
+    altered = copy.deepcopy(proof)
+    altered["checkpoint"]["start_seq"] += 1
+    assert not audit.verify_proof(altered, audit.public_key)["valid"]
+
+
+def test_version_two_checkpoints_remain_readable_when_version_three_is_appended(tmp_path):
+    class VersionTwoAudit(AuditLogger):
+        def sign(self, payload):
+            if payload.get("kind") == "merkle_checkpoint":
+                payload = {**payload, "schema_version": 2}
+            return super().sign(payload)
+
+    archive = EvidenceArchive(tmp_path / "archive")
+    old = VersionTwoAudit(EventBroker(), tmp_path / "data", archive, 2)
+    old.record(event())
+    old.record(event())
+    assert old.get_proof(0)["checkpoint"]["schema_version"] == 2
+    current = AuditLogger(EventBroker(), tmp_path / "data", archive, 2)
+    current.record(event())
+    proof = current.get_proof(2)
+    assert proof["checkpoint"]["schema_version"] == 3
+    assert current.verify_proof(current.get_proof(0), current.public_key)["valid"]
+    assert current.verify_proof(proof, current.public_key)["valid"]
+    assert current.verify_chain()["verified"]
+
+
 @pytest.mark.parametrize(
     "index,size,path",
     [(99, 1, []), (-1, 1, []), (0, 0, []), (0, 1, ["00" * 32]), (0, 2, []), (0, 2, ["zz" * 32])],

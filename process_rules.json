@@ -3,20 +3,49 @@
   "description": "CryptoVeil MITRE ATT&CK Process Behavior Rule Set",
   "rules": [
     {
+      "id": "CV-BROWSER-SHELL-001",
+      "mitre_id": "T1059",
+      "mitre_name": "Command and Scripting Interpreter",
+      "severity": "high",
+      "description": "A browser directly launched a command interpreter; review whether the handoff was authorised.",
+      "conditions": {
+        "process_name_in": [
+          "powershell.exe",
+          "pwsh.exe",
+          "cmd.exe",
+          "mshta.exe",
+          "wscript.exe",
+          "cscript.exe"
+        ],
+        "parent_name_in": [
+          "chrome.exe",
+          "msedge.exe",
+          "brave.exe",
+          "opera.exe",
+          "firefox.exe"
+        ]
+      }
+    },
+    {
+      "id": "CV-ENCODED-POWERSHELL-001",
+      "mitre_id": "T1059.001",
+      "mitre_name": "PowerShell",
+      "severity": "medium",
+      "description": "PowerShell received an encoded-command argument; verify the script's purpose and authorisation.",
+      "conditions": {
+        "process_name_in": ["powershell.exe", "pwsh.exe"],
+        "cmdline_regex": "(?:^|\\s)-(?:e|en|enc|enco|encodedcommand)\\s+[A-Za-z0-9+/=]{8,}"
+      }
+    },
+    {
       "id": "CV-LINEAGE-001",
       "mitre_id": "T1036.005",
       "mitre_name": "Masquerading: Match Legitimate Name",
       "severity": "medium",
       "description": "Unexpected svchost.exe parent lineage; review for masquerading. This does not prove process hollowing.",
       "conditions": {
-        "process_name_in": [
-          "svchost.exe"
-        ],
-        "parent_name_not_in": [
-          "services.exe",
-          "svchost.exe",
-          "wininit.exe"
-        ]
+        "process_name_in": ["svchost.exe"],
+        "parent_name_not_in": ["services.exe", "svchost.exe", "wininit.exe"]
       }
     },
     {
@@ -26,11 +55,7 @@
       "severity": "high",
       "description": "A shell was launched by an Office application; review whether this was expected.",
       "conditions": {
-        "process_name_in": [
-          "powershell.exe",
-          "pwsh.exe",
-          "cmd.exe"
-        ],
+        "process_name_in": ["powershell.exe", "pwsh.exe", "cmd.exe"],
         "parent_name_in": [
           "winword.exe",
           "excel.exe",
@@ -54,9 +79,7 @@
           "wscript.exe",
           "cscript.exe"
         ],
-        "parent_name_in": [
-          "wmiprvse.exe"
-        ]
+        "parent_name_in": ["wmiprvse.exe"]
       }
     },
     {
@@ -66,9 +89,7 @@
       "severity": "high",
       "description": "mshta.exe launched with a remote URL argument (LOLBin abuse)",
       "conditions": {
-        "process_name_in": [
-          "mshta.exe"
-        ],
+        "process_name_in": ["mshta.exe"],
         "cmdline_regex": "https?://"
       }
     },
@@ -79,9 +100,7 @@
       "severity": "high",
       "description": "regsvr32.exe used with scrobj.dll or remote URL (Squiblydoo attack)",
       "conditions": {
-        "process_name_in": [
-          "regsvr32.exe"
-        ],
+        "process_name_in": ["regsvr32.exe"],
         "cmdline_regex": "(scrobj|https?://)"
       }
     },
@@ -127,9 +146,7 @@
       "severity": "medium",
       "description": "cmd.exe with encoded or piped commands suggesting script execution",
       "conditions": {
-        "process_name_in": [
-          "cmd.exe"
-        ],
+        "process_name_in": ["cmd.exe"],
         "cmdline_regex": "(/c\\s+|/k\\s+).*(powershell|wscript|mshta|certutil)"
       }
     }

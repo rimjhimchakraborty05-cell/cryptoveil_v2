@@ -6,6 +6,7 @@ const TYPES = new Set([
   "site_warning",
   "shadow_ai_network",
   "shadow_ai_iframe",
+  "shadow_ai_dom",
   "sensitive_field_used",
   "masking_activated",
   "masking_deactivated",
@@ -36,8 +37,68 @@ const AI_HOSTS = [
   "openrouter.ai",
 ];
 const cache = new Map();
+const pages = new Map();
 let config = { app_url: DEFAULT_APP, token: "", name: "" },
   flushing = false;
+function browserFamily(agent = globalThis.navigator) {
+  const brands =
+    agent?.userAgentData?.brands?.map((b) => b.brand).join(" ") || "";
+  const ua = agent?.userAgent || "";
+  if (/Microsoft Edge|Edg\//.test(`${brands} ${ua}`)) return "Edge";
+  if (/Opera|OPR\//.test(`${brands} ${ua}`)) return "Opera";
+  if (/Brave/.test(brands) || agent?.brave) return "Brave";
+  if (/Google Chrome|Chrome\//.test(`${brands} ${ua}`)) return "Chrome";
+  if (/Chromium/.test(brands)) return "Chromium";
+  return "Unknown";
+}
+function cleanEmail(value) {
+  return typeof value === "string" &&
+    value.length <= 254 &&
+    /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(value)
+    ? value
+    : null;
+}
+function profileContext() {
+  return {
+    browser_family: browserFamily(),
+    account_email: cleanEmail(config.account_email),
+    account_source: config.account_source || "not_shared",
+  };
+}
+async function syncIdentity() {
+  let email = null,
+    source = "not_shared";
+  if (config.identity_mode === "manual") {
+    email = cleanEmail(config.manual_email);
+    source = email ? "user_provided" : "not_shared";
+  } else if (config.identity_mode === "profile") {
+    source = "unavailable";
+    try {
+      if (
+        await chrome.permissions?.contains({
+          permissions: ["identity", "identity.email"],
+        })
+      ) {
+        const result = await chrome.identity?.getProfileUserInfo({
+          accountStatus: "ANY",
+        });
+        email = cleanEmail(result?.email);
+        if (email) source = "browser_profile";
+      }
+    } catch {}
+  }
+  await locked(async () => {
+    config.account_email = email;
+    config.account_source = source;
+    await chrome.storage.local.set({ cv_config: config });
+  });
+}
+function pageId(tabId, documentId) {
+  const key = `${tabId}:${documentId || "current"}`;
+  if (!pages.has(key)) pages.set(key, crypto.randomUUID());
+  if (pages.size > 512) pages.delete(pages.keys().next().value);
+  return pages.get(key);
+}
 function hostOnly(value) {
   try {
     return new URL(
@@ -136,6 +197,31 @@ function normalize(event) {
   if (ai) result.ai_domain = ai;
   if (event.field_type)
     result.field_type = String(event.field_type).slice(0, 30);
+  if (
+    typeof event.page_id === "string" &&
+    /^[0-9a-f-]{36}$/i.test(event.page_id)
+  )
+    result.page_id = event.page_id;
+  if (["ai_script", "ai_component"].includes(event.dom_signal))
+    result.dom_signal = event.dom_signal;
+  if (event.profile_context) {
+    const context = event.profile_context;
+    result.profile_context = {
+      browser_family: ["Chrome", "Edge", "Brave", "Opera", "Chromium"].includes(
+        context.browser_family,
+      )
+        ? context.browser_family
+        : "Unknown",
+      account_email: cleanEmail(context.account_email),
+      account_source: [
+        "browser_profile",
+        "user_provided",
+        "unavailable",
+      ].includes(context.account_source)
+        ? context.account_source
+        : "not_shared",
+    };
+  }
   if (event.dropped_count)
     result.dropped_count = Math.min(
       2 ** 31 - 1,
@@ -193,7 +279,8 @@ async function updateStatus(update) {
   });
 }
 async function queueEvent(event) {
-  const normalized = normalize(event);
+  await ready;
+  const normalized = normalize({ ...event, profile_context: profileContext() });
   if (!normalized) return;
   await locked(async () => {
     const data = await chrome.storage.local.get([
@@ -296,9 +383,11 @@ async function flushQueue() {
     }
     const { cv_queue = [], cv_dropped_total = 0 } =
       await chrome.storage.local.get(["cv_queue", "cv_dropped_total"]);
+    await syncIdentity();
     const heartbeat = await request("/api/browser/heartbeat", {
       queued_events: cv_queue.length,
       dropped_events: cv_dropped_total,
+      profile_context: profileContext(),
     });
     await updateStatus({
       online: true,
@@ -338,7 +427,21 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "cv_delivery") flushQueue();
 });
 chrome.runtime.onStartup.addListener(() => flushQueue());
-ready.then(() => flushQueue()).catch(() => {});
+const startup = ready.then(async () => {
+  await syncIdentity();
+  await flushQueue();
+});
+startup.catch(() => {});
+chrome.identity?.onSignInChanged?.addListener(() =>
+  syncIdentity()
+    .then(flushQueue)
+    .catch(() => {}),
+);
+chrome.permissions?.onRemoved?.addListener(() =>
+  syncIdentity()
+    .then(flushQueue)
+    .catch(() => {}),
+);
 chrome.webNavigation.onCommitted.addListener(async (details) => {
   if (details.frameId !== 0 || !/^https?:/.test(details.url)) return;
   const url = new URL(details.url);
@@ -349,11 +452,18 @@ chrome.webNavigation.onCommitted.addListener(async (details) => {
   chrome.tabs
     .sendMessage(details.tabId, { type: "cv_trust_update", ...scored })
     .catch(() => {});
-  await queueEvent({ type: "site_visit", hostname: url.hostname, ...scored });
+  const page_id = pageId(details.tabId, details.documentId);
+  await queueEvent({
+    type: "site_visit",
+    hostname: url.hostname,
+    page_id,
+    ...scored,
+  });
   if (scored.score < 65)
     await queueEvent({
       type: "site_warning",
       hostname: url.hostname,
+      page_id,
       ...scored,
     });
 });
@@ -373,7 +483,8 @@ chrome.webRequest.onBeforeRequest.addListener(
     queueEvent({
       type: "shadow_ai_network",
       ai_domain: matched,
-      hostname: host,
+      hostname: hostOnly(details.initiator || "") || host,
+      page_id: pageId(details.tabId, details.documentId),
     }).catch(() => {});
   },
   { urls: ["http://*/*", "https://*/*"] },
@@ -384,17 +495,22 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     await ready;
     const popup = sender.url === chrome.runtime.getURL("popup.html");
     if (message.type === "cv_dom_event" && sender.tab) {
-      const pageHost = hostOnly(sender.tab.url || "");
+      const pageHost = hostOnly(sender.url || sender.tab.url || "");
       if (
         ![
           "shadow_ai_iframe",
+          "shadow_ai_dom",
           "sensitive_field_used",
           "masking_activated",
           "masking_deactivated",
         ].includes(message.payload?.type)
       )
         throw new Error("Unsupported page observation");
-      await queueEvent({ ...message.payload, hostname: pageHost });
+      await queueEvent({
+        ...message.payload,
+        hostname: pageHost,
+        page_id: pageId(sender.tab.id, sender.documentId),
+      });
       return { ok: true };
     }
     if (message.type === "cv_get_page_settings") {
@@ -424,6 +540,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         last_receipt: data.cv_latest_receipt,
         dropped_total: data.cv_dropped_total || 0,
         masking: Boolean(data.cv_masking),
+        profile_context: profileContext(),
         legacy_count: (data.cv_legacy_queue || []).length,
       };
     }
@@ -440,7 +557,12 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
           },
           "",
         );
-        config = { app_url: url, token: result.token, name: result.name };
+        config = {
+          ...config,
+          app_url: url,
+          token: result.token,
+          name: result.name,
+        };
         await chrome.storage.local.set({ cv_config: config });
       });
       await flushQueue();
@@ -449,6 +571,21 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (message.type === "cv_retry") {
       await flushQueue();
       return { ok: true };
+    }
+    if (message.type === "cv_identity_set") {
+      if (!["profile", "manual", "none"].includes(message.mode))
+        throw new Error("Choose an account label option");
+      const email = cleanEmail(String(message.email || "").trim());
+      if (message.mode === "manual" && !email)
+        throw new Error("Enter a valid email label");
+      await locked(async () => {
+        config.identity_mode = message.mode;
+        config.manual_email = message.mode === "manual" ? email : null;
+        await chrome.storage.local.set({ cv_config: config });
+      });
+      await syncIdentity();
+      await flushQueue();
+      return { ok: true, profile_context: profileContext() };
     }
     if (message.type === "cv_masking") {
       await locked(() =>
@@ -476,4 +613,12 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   return true;
 });
 // Pure functions are exported for regression tests; tokens never leave the worker.
-export { localScore, normalize, queueEvent, flushQueue, ready };
+export {
+  localScore,
+  normalize,
+  queueEvent,
+  flushQueue,
+  ready,
+  startup,
+  browserFamily,
+};

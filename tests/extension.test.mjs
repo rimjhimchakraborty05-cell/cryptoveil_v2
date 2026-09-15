@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import vm from "node:vm";
 
 const source = await readFile(
   new URL("../extension/background.js", import.meta.url),
@@ -90,6 +91,7 @@ async function worker(t) {
     `data:text/javascript;base64,${Buffer.from(code).toString("base64")}`
   );
   await module.ready;
+  await module.startup;
   const response = await new Promise((resolve) => {
     onMessage(
       {
@@ -103,7 +105,14 @@ async function worker(t) {
     );
   });
   assert.deepEqual(response, { ok: true });
-  return { ...module, storage, network };
+  const send = (
+    payload,
+    sender = { id: runtime.id, url: runtime.getURL("popup.html") },
+  ) =>
+    new Promise((resolve) => {
+      onMessage(payload, sender, resolve);
+    });
+  return { ...module, storage, network, send };
 }
 
 test("a stored receipt removes the acknowledged event, including sequence zero", async (t) => {
@@ -185,10 +194,133 @@ test("normalization excludes page secrets and URL paths from delivery", async (t
     "event_id",
     "field_type",
     "hostname",
+    "profile_context",
     "score",
     "type",
   ]);
   assert.equal(w.normalize({ type: "unsupported" }), null);
   assert.equal(w.localScore("https://accounts.google.com").score, 100);
   assert.ok(w.localScore("https://paypa1.com").score < 65);
+});
+
+test("account changes never relabel already queued evidence", async (t) => {
+  const w = await worker(t);
+  await w.send({
+    type: "cv_identity_set",
+    mode: "manual",
+    email: "first@example.test",
+  });
+  w.network.mode = "offline";
+  await w.queueEvent({ type: "site_visit", hostname: "example.test" });
+  await w.send({
+    type: "cv_identity_set",
+    mode: "manual",
+    email: "second@example.test",
+  });
+  assert.equal(
+    w.storage.cv_queue[0].profile_context.account_email,
+    "first@example.test",
+  );
+  w.network.mode = "ok";
+  await w.flushQueue();
+  assert.equal(
+    w.network.attempts.at(-1).profile_context.account_email,
+    "first@example.test",
+  );
+  await w.queueEvent({ type: "site_visit", hostname: "example.test" });
+  assert.equal(
+    w.network.attempts.at(-1).profile_context.account_email,
+    "second@example.test",
+  );
+  assert.equal(
+    w.network.attempts.at(-1).profile_context.account_source,
+    "user_provided",
+  );
+});
+
+test("profile email uses permission and clears stale identity after sign-out", async (t) => {
+  const w = await worker(t);
+  let email = "profile@example.test",
+    allowed = true;
+  chrome.permissions = { contains: async () => allowed };
+  chrome.identity = { getProfileUserInfo: async () => ({ email }) };
+  let result = await w.send({ type: "cv_identity_set", mode: "profile" });
+  assert.equal(result.profile_context.account_email, email);
+  assert.equal(result.profile_context.account_source, "browser_profile");
+  email = "";
+  await w.flushQueue();
+  result = await w.send({ type: "cv_status" });
+  assert.equal(result.profile_context.account_email, null);
+  assert.equal(result.profile_context.account_source, "unavailable");
+  email = "profile@example.test";
+  allowed = false;
+  await w.flushQueue();
+  assert.equal(w.storage.cv_config.account_email, null);
+});
+
+test("page scripts cannot change the browser account label", async (t) => {
+  const w = await worker(t);
+  const response = await w.send(
+    { type: "cv_identity_set", mode: "manual", email: "forged@example.test" },
+    {
+      id: "a".repeat(32),
+      url: "https://example.test",
+      tab: { id: 1, url: "https://example.test" },
+    },
+  );
+  assert.match(response.error, /popup only/);
+  assert.equal(w.storage.cv_config.account_email, null);
+});
+
+test("Chrome and Edge identification is independent of the search engine", async (t) => {
+  const w = await worker(t);
+  assert.equal(
+    w.browserFamily({
+      userAgent: "Mozilla/5.0 Chrome/152.0 Safari/537.36 Edg/152.0",
+    }),
+    "Edge",
+  );
+  assert.equal(
+    w.browserFamily({ userAgent: "Mozilla/5.0 Chrome/152.0 Safari/537.36" }),
+    "Chrome",
+  );
+  assert.equal(w.browserFamily({ userAgent: "Unknown browser" }), "Unknown");
+});
+
+test("DOM analysis accepts observable AI components without matching lookalike domains", async () => {
+  const context = vm.createContext({ URL });
+  vm.runInContext(
+    await readFile(new URL("../extension/signals.js", import.meta.url), "utf8"),
+    context,
+  );
+  const classify = context.CryptoVeilSignals.classify;
+  assert.equal(
+    classify(
+      "SCRIPT",
+      "https://api.openai.com/widget.js?token=private",
+      "",
+      "https://work.example",
+    ).ai_domain,
+    "api.openai.com",
+  );
+  assert.equal(
+    classify("IFRAME", "https://sider.ai/panel", "", "https://work.example")
+      .type,
+    "shadow_ai_iframe",
+  );
+  assert.equal(
+    classify(
+      "SCRIPT",
+      "https://openai.com.attacker.test/a.js",
+      "",
+      "https://work.example",
+    ),
+    null,
+  );
+  assert.equal(
+    classify("DIV", "", "openai", "https://work.example").dom_signal,
+    "ai_component",
+  );
+  assert.equal(classify("INPUT", "", "", "https://work.example"), null);
+  assert.equal(classify("DIV", "", "__proto__", "https://work.example"), null);
 });

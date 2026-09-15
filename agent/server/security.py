@@ -72,10 +72,16 @@ class PairingManager:
                 return client
         return None
 
-    def heartbeat(self, client_id: str, queued: int, dropped: int) -> None:
+    def heartbeat(self, client_id: str, queued: int, dropped: int, profile_context=None) -> None:
         self.clients[client_id].update(
             last_seen=time.time(), queued_events=queued, dropped_events=dropped
         )
+        if (
+            profile_context is not None
+            and self.clients[client_id].get("profile_context") != profile_context
+        ):
+            self.clients[client_id]["profile_context"] = profile_context
+            self._save()
 
     def public_clients(self) -> list[dict]:
         return [

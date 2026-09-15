@@ -32,10 +32,7 @@ def node_hash(left: bytes, right: bytes) -> bytes:
 
 
 def _largest_power_of_two_less_than(n: int) -> int:
-    k = 1
-    while k * 2 < n:
-        k *= 2
-    return k
+    return 1 << ((n - 1).bit_length() - 1) if n > 1 else 1
 
 
 @dataclass
@@ -138,7 +135,7 @@ class MerkleTree:
             return False
 
 
-def _rebuild_root(leaf: bytes, index: int, size: int, path: list[bytes]) -> bytes:
+def _rebuild_root(leaf: bytes, index: int, size: int, path: list[bytes], position=None) -> bytes:
     """
     Reconstructs the Merkle root from a leaf hash and its audit path,
     mirroring MerkleTree._audit_path's exact traversal order: the audit
@@ -147,9 +144,11 @@ def _rebuild_root(leaf: bytes, index: int, size: int, path: list[bytes]) -> byte
     """
     if size <= 1:
         return leaf
+    if position is None:
+        position = len(path) - 1
     k = _largest_power_of_two_less_than(size)
     if index < k:
-        sub_root = _rebuild_root(leaf, index, k, path[:-1])
-        return node_hash(sub_root, path[-1])
-    sub_root = _rebuild_root(leaf, index - k, size - k, path[:-1])
-    return node_hash(path[-1], sub_root)
+        sub_root = _rebuild_root(leaf, index, k, path, position - 1)
+        return node_hash(sub_root, path[position])
+    sub_root = _rebuild_root(leaf, index - k, size - k, path, position - 1)
+    return node_hash(path[position], sub_root)

@@ -142,14 +142,26 @@ class AuditLogger:
         if self._private_key is None:
             raise IntegrityError("Signing key unavailable")
         body = {**payload, "public_key": self.public_key}
-        return {**body, "signature": self._private_key.sign(canonical(body)).hex()}
+        return {
+            **body,
+            "signature": self._private_key.sign(canonical(self.signed_body(body))).hex(),
+        }
+
+    @staticmethod
+    def signed_body(payload: dict) -> dict:
+        # Version 3 authenticates the compact header. Its signed root commits
+        # to all leaves; the stored leaf list is checked against that root.
+        excluded = {"signature"}
+        if payload.get("schema_version") == 3 and payload.get("kind") == "merkle_checkpoint":
+            excluded.add("leaves")
+        return {k: v for k, v in payload.items() if k not in excluded}
 
     @staticmethod
     def verify_signature(payload: dict, trusted_key: str) -> bool:
         try:
             if payload["public_key"] != trusted_key:
                 return False
-            body = {k: v for k, v in payload.items() if k != "signature"}
+            body = AuditLogger.signed_body(payload)
             Ed25519PublicKey.from_public_bytes(bytes.fromhex(trusted_key)).verify(
                 bytes.fromhex(payload["signature"]), canonical(body)
             )
@@ -160,7 +172,7 @@ class AuditLogger:
             return False
 
     def _checkpoint_signature_ok(self, cp: dict) -> bool:
-        if cp.get("schema_version") == 2:
+        if cp.get("schema_version") in (2, 3):
             return self.verify_signature(cp, self.public_key)
         # Preserve v2.0 logs, whose signatures covered only the root. Their
         # weaker metadata binding is surfaced explicitly in the result.
@@ -308,7 +320,7 @@ class AuditLogger:
         batch = self._pending_batch
         cp = self.sign(
             {
-                "schema_version": 2,
+                "schema_version": 3,
                 "kind": "merkle_checkpoint",
                 "checkpoint_seq": len(self._checkpoints),
                 "events_included": len(batch),
@@ -338,6 +350,19 @@ class AuditLogger:
                 except (OSError, ValueError) as exc:
                     self.collection_error = f"Checkpoint persistence failed: {exc}"
                     raise IntegrityError(self.collection_error) from exc
+
+    def entry_by_id(self, event_id: str) -> dict | None:
+        with self._lock:
+            seq = self._event_ids.get(event_id)
+            if seq is None:
+                return None
+            entry = self.archive.retrieve_event(seq)
+            if entry and (
+                not isinstance(entry.get("event"), dict)
+                or entry["event"].get("event_id") != event_id
+            ):
+                raise ValueError("The archived evidence identity changed")
+            return entry
 
     def verify_chain(self) -> dict:
         with self._lock:
@@ -441,7 +466,7 @@ class AuditLogger:
                         or merkle_root(leaves) != cp["merkle_root"]
                     ):
                         raise ValueError("Checkpoint range, leaves or root is inconsistent")
-                    if cp.get("schema_version") == 2:
+                    if cp.get("schema_version") in (2, 3):
                         if cp.get("previous_checkpoint_hash") != previous_cp:
                             raise ValueError("Checkpoint chain is broken")
                     else:
@@ -661,7 +686,9 @@ class AuditLogger:
                     proof = tree.inclusion_proof(index)
                     return {
                         "seq": seq,
-                        "checkpoint": cp,
+                        "checkpoint": {k: v for k, v in cp.items() if k != "leaves"}
+                        if cp.get("schema_version") == 3
+                        else cp,
                         "leaf_data": cp["leaves"][index],
                         "leaf_index": index,
                         "tree_size": proof.tree_size,
@@ -676,13 +703,29 @@ class AuditLogger:
             if not isinstance(cp, dict):
                 raise TypeError("Checkpoint must be an object")
             metadata_ok = (
-                cp.get("schema_version") == 2
+                cp.get("schema_version") in (2, 3)
+                and all(
+                    type(cp[k]) is int
+                    for k in ("start_seq", "end_seq", "events_included", "checkpoint_seq")
+                )
+                and all(type(payload[k]) is int for k in ("seq", "leaf_index", "tree_size"))
+                and cp["start_seq"] >= 0
+                and cp["checkpoint_seq"] >= 0
                 and payload["seq"] == cp["start_seq"] + payload["leaf_index"]
-                and payload["tree_size"] == cp["events_included"] == len(cp["leaves"])
-                and cp["end_seq"] == cp["start_seq"] + len(cp["leaves"]) - 1
-                and 0 <= payload["leaf_index"] < len(cp["leaves"])
-                and payload["leaf_data"] == cp["leaves"][payload["leaf_index"]]
+                and payload["tree_size"] == cp["events_included"]
+                and cp["end_seq"] == cp["start_seq"] + cp["events_included"] - 1
+                and 0 <= payload["leaf_index"] < cp["events_included"]
             )
+            if cp.get("schema_version") == 3:
+                metadata_ok = (
+                    metadata_ok and cp.get("kind") == "merkle_checkpoint" and "leaves" not in cp
+                )
+            else:
+                metadata_ok = (
+                    metadata_ok
+                    and payload["tree_size"] == len(cp["leaves"])
+                    and payload["leaf_data"] == cp["leaves"][payload["leaf_index"]]
+                )
             inclusion_ok = MerkleTree.verify_inclusion_proof(
                 bytes.fromhex(payload["leaf_data"]),
                 InclusionProof(payload["leaf_index"], payload["tree_size"], payload["audit_path"]),

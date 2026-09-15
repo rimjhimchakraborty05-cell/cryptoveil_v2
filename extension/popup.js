@@ -10,6 +10,16 @@ async function refresh() {
     recent = Date.now() - (data.status.updated_at || 0) < 90000;
   $("pair-form").hidden = data.paired;
   $("paired-panel").hidden = !data.paired;
+  $("account-panel").hidden = !data.paired;
+  const profile = data.profile_context || {};
+  const sources = {
+    browser_profile: "Reported by browser profile",
+    user_provided: "Manual label · not verified sign-in",
+    unavailable: "Profile email unavailable · you can enter a manual label",
+    not_shared: "Account email not shared",
+  };
+  $("account-status").textContent =
+    `${profile.browser_family || "Browser"} · ${profile.account_email || "No email attached"} · ${sources[profile.account_source] || sources.not_shared}`;
   $("mask-toggle").checked = data.masking;
   $("app-url").value = data.app_url;
   const online = data.paired && recent && data.status.online;
@@ -62,6 +72,38 @@ $("pair-form").addEventListener("submit", (event) => {
 });
 $("retry-button").addEventListener("click", (event) =>
   run(event.currentTarget, () => message({ type: "cv_retry" })),
+);
+$("profile-account").addEventListener("click", (event) => {
+  // Request directly during the user gesture, before any asynchronous work.
+  const permission = chrome.permissions.request({
+    permissions: ["identity", "identity.email"],
+  });
+  run(event.currentTarget, async () => {
+    if (!(await permission))
+      throw new Error(
+        "Email permission was not granted. You can use a manual label.",
+      );
+    await message({ type: "cv_identity_set", mode: "profile" });
+  });
+});
+$("account-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  run($("manual-account"), async () => {
+    await message({
+      type: "cv_identity_set",
+      mode: "manual",
+      email: $("account-email").value,
+    });
+    $("account-email").value = "";
+  });
+});
+$("clear-account").addEventListener("click", (event) =>
+  run(event.currentTarget, async () => {
+    await message({ type: "cv_identity_set", mode: "none" });
+    await chrome.permissions.remove({
+      permissions: ["identity", "identity.email"],
+    });
+  }),
 );
 $("open-app").addEventListener("click", (event) =>
   run(event.currentTarget, () => message({ type: "cv_open_app" })),

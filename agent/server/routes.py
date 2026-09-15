@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 import uuid
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ..bus.events import BrowserTelemetryEvent, EventSeverity
 from ..forensics.audit_logger import AuditLogger, IntegrityError
@@ -25,7 +26,7 @@ class StrictPayload(BaseModel):
 
 @router.get("/api/health")
 def health():
-    return {"status": "ok", "service": "cryptoveil-agent", "version": "2.1.0"}
+    return {"status": "ok", "service": "cryptoveil-agent", "version": "2.2.0"}
 
 
 @router.get("/api/session")
@@ -68,19 +69,47 @@ async def pairing_complete(payload: PairingPayload, request: Request):
 async def revoke_browser(client_id: str, request: Request):
     if not request.app.state.pairing.revoke(client_id):
         raise HTTPException(404, "Paired browser not found")
+    request.app.state.live.notify()
     return {"revoked": True}
+
+
+class ProfileContext(StrictPayload):
+    browser_family: Literal["Chrome", "Edge", "Brave", "Opera", "Chromium", "Unknown"] = "Unknown"
+    account_email: str | None = Field(default=None, max_length=254)
+    account_source: Literal["not_shared", "browser_profile", "user_provided", "unavailable"] = (
+        "not_shared"
+    )
+
+    @field_validator("account_email")
+    @classmethod
+    def valid_email_label(cls, value):
+        if value is not None and not re.fullmatch(r"[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+", value):
+            raise ValueError("Enter a valid email label")
+        return value
+
+    @model_validator(mode="after")
+    def consistent_source(self):
+        shared = self.account_source in ("browser_profile", "user_provided")
+        if shared != bool(self.account_email):
+            raise ValueError("The account email and its source must agree")
+        return self
 
 
 class HeartbeatPayload(StrictPayload):
     queued_events: int = Field(default=0, ge=0, le=10000)
     dropped_events: int = Field(default=0, ge=0, le=2**31 - 1)
+    profile_context: ProfileContext | None = None
 
 
 @router.post("/api/browser/heartbeat")
 async def heartbeat(payload: HeartbeatPayload, request: Request):
     request.app.state.pairing.heartbeat(
-        request.state.browser_client["id"], payload.queued_events, payload.dropped_events
+        request.state.browser_client["id"],
+        payload.queued_events,
+        payload.dropped_events,
+        payload.profile_context.model_dump() if payload.profile_context else None,
     )
+    request.app.state.live.notify()
     return {
         "received": True,
         "collection_paused": bool(request.app.state.audit_logger.collection_error),
@@ -94,6 +123,7 @@ class TelemetryPayload(StrictPayload):
         "site_warning",
         "shadow_ai_network",
         "shadow_ai_iframe",
+        "shadow_ai_dom",
         "sensitive_field_used",
         "masking_activated",
         "masking_deactivated",
@@ -106,6 +136,9 @@ class TelemetryPayload(StrictPayload):
     field_type: str | None = Field(default=None, max_length=30)
     collected_at_ms: int = Field(ge=0, le=32_503_680_000_000, strict=True)
     dropped_count: int = Field(default=0, ge=0, le=2**31 - 1)
+    page_id: uuid.UUID | None = None
+    profile_context: ProfileContext | None = None
+    dom_signal: Literal["ai_script", "ai_component"] | None = None
 
     @field_validator("reasons")
     @classmethod
@@ -146,6 +179,7 @@ async def browser_telemetry(payload: TelemetryPayload, request: Request):
         hostname=payload.hostname,
         trust_score=payload.score,
         browser_name=client["name"],
+        user_email=payload.profile_context.account_email if payload.profile_context else None,
         detail={
             "client_id": client["id"],
             "client_event_id": str(payload.event_id),
@@ -173,6 +207,35 @@ async def browser_telemetry(payload: TelemetryPayload, request: Request):
     }
 
 
+@router.get("/api/live")
+async def live_updates(request: Request):
+    live = request.app.state.live
+    subscription = live.subscribe()
+    try:
+        queue = await subscription.__aenter__()
+    except RuntimeError as exc:
+        raise HTTPException(429, str(exc)) from exc
+
+    async def frames():
+        try:
+            yield "retry: 2000\n\n" + live.frame()
+            while not await request.is_disconnected():
+                try:
+                    await asyncio.wait_for(queue.get(), timeout=15)
+                    # Coalesce a burst into one refresh, keeping a slow browser
+                    # from creating a backlog or delaying evidence writes.
+                    await asyncio.sleep(0.2)
+                    yield live.frame()
+                except TimeoutError:
+                    yield ": keepalive\n\n"
+        finally:
+            await subscription.__aexit__(None, None, None)
+
+    return StreamingResponse(
+        frames(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"}
+    )
+
+
 def event_view(entry: dict) -> dict:
     ev = entry["event"]
     return {
@@ -186,6 +249,17 @@ def event_view(entry: dict) -> dict:
         "next_step": next_step(ev),
         "event": ev,
     }
+
+
+@router.get("/api/events/id/{event_id}")
+def event_by_id(event_id: uuid.UUID, request: Request):
+    try:
+        entry = request.app.state.audit_logger.entry_by_id(str(event_id))
+    except (OSError, ValueError) as exc:
+        raise HTTPException(409, "The related evidence copy is damaged; run verification") from exc
+    if entry is None:
+        raise HTTPException(404, "Related evidence is missing or was not collected in this ledger")
+    return event_view(entry)
 
 
 @router.get("/api/events")
@@ -229,6 +303,11 @@ def status(request: Request):
                 "name": type(sensor).__name__,
                 "status": health,
                 "detail": getattr(sensor, "last_error", None),
+                "mode": getattr(
+                    sensor,
+                    "mode",
+                    "filesystem_push" if type(sensor).__name__ == "EntropyWatcher" else "sampled",
+                ),
             }
         )
     return {
@@ -248,6 +327,7 @@ def status(request: Request):
         "extension_path": str((BASE_DIR / "extension").resolve()),
         "verification_interval_seconds": state.settings.verification_seconds,
         "delivery_errors": state.broker.stats()["dead_letter_count"],
+        "live_revision": state.live.revision,
     }
 
 

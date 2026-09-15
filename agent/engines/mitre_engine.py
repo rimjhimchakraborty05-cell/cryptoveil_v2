@@ -47,7 +47,43 @@ class MitreEngine:
     def reload_rules(self) -> None:
         with open(self._rules_path, encoding="utf-8") as f:
             data = json.load(f)
-        self._rules = data.get("rules", [])
+        rules = data.get("rules", [])
+        allowed = {
+            "process_name_in",
+            "parent_name_in",
+            "parent_name_not_in",
+            "exe_path_not_contains",
+            "cmdline_regex",
+        }
+        seen = set()
+        if not isinstance(rules, list) or len(rules) > 128:
+            raise ValueError("Rules must be a list containing at most 128 entries")
+        for rule in rules:
+            if not isinstance(rule, dict) or any(
+                not isinstance(rule.get(key), str) or not rule[key]
+                for key in ("id", "mitre_id", "mitre_name", "description")
+            ):
+                raise ValueError("Each rule needs an ID, MITRE technique, name and description")
+            if rule["id"] in seen or rule.get("severity", "high") not in SEVERITY_MAP:
+                raise ValueError("Rule IDs must be unique and severity must be recognised")
+            seen.add(rule["id"])
+            conditions = rule.get("conditions")
+            if not isinstance(conditions, dict) or not conditions or set(conditions) - allowed:
+                raise ValueError(f"Unsupported or empty conditions in {rule['id']}")
+            for key, value in conditions.items():
+                if key == "cmdline_regex":
+                    if not isinstance(value, str) or not 0 < len(value) <= 512:
+                        raise ValueError(
+                            "Command pattern must be a nonempty string of at most 512 characters"
+                        )
+                    re.compile(value, re.IGNORECASE)
+                elif (
+                    not isinstance(value, list)
+                    or not value
+                    or any(not isinstance(item, str) or not item for item in value)
+                ):
+                    raise ValueError(f"{key} requires a nonempty list of strings")
+        self._rules = rules
         log.info("MitreEngine loaded %d rules from %s", len(self._rules), self._rules_path)
 
     def attach(self) -> None:

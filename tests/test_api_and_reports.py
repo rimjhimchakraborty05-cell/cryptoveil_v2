@@ -69,6 +69,7 @@ def telemetry(**changes):
 
 
 def test_auth_origin_and_csrf_boundaries(client):
+    assert client.get("/api/live").status_code == 401
     assert client.get("/api/status").status_code == 401
     assert client.post("/api/browser/telemetry", json=telemetry()).status_code == 401
     assert (
@@ -94,6 +95,74 @@ def test_auth_origin_and_csrf_boundaries(client):
         == 200
     )
     assert client.post("/api/pairing/complete", json={"code": "00000000"}).status_code == 403
+
+
+def test_browser_account_context_is_saved_per_event_and_survives_identity_changes(client):
+    headers = pair(client)
+    profile = {
+        "browser_family": "Edge",
+        "account_email": "owner@example.test",
+        "account_source": "browser_profile",
+    }
+    body = telemetry(profile_context=profile)
+    first = client.post("/api/browser/telemetry", json=body, headers=headers)
+    assert first.status_code == 200
+    changed = {
+        **profile,
+        "account_email": "different@example.test",
+        "account_source": "user_provided",
+    }
+    assert (
+        client.post(
+            "/api/browser/heartbeat", json={"profile_context": changed}, headers=headers
+        ).status_code
+        == 200
+    )
+    retry = client.post("/api/browser/telemetry", json=body, headers=headers)
+    assert retry.json()["duplicate"]
+    assert retry.json()["seq"] == first.json()["seq"]
+    event = client.get("/api/events").json()["events"][0]["event"]
+    assert event["user_email"] == "owner@example.test"
+    assert client.get("/api/status").json()["clients"][0]["profile_context"] == changed
+
+
+def test_dom_signals_are_validated_and_can_generate_linked_evidence(client):
+    headers, page_id = pair(client), str(uuid.uuid4())
+    for kind in ("shadow_ai_dom", "sensitive_field_used"):
+        result = client.post(
+            "/api/browser/telemetry", json=telemetry(type=kind, page_id=page_id), headers=headers
+        )
+        assert result.status_code == 200
+    event = client.get("/api/events").json()["events"][0]["event"]
+    assert event["topic"] == "engine.correlation.finding"
+    assert len(event["evidence_ids"]) == 2
+    for event_id in event["evidence_ids"]:
+        related = client.get(f"/api/events/id/{event_id}")
+        assert related.status_code == 200
+        assert related.json()["event"]["event_id"] == event_id
+    assert (
+        client.post(
+            "/api/browser/telemetry",
+            json=telemetry(dom_signal="password_contents"),
+            headers=headers,
+        ).status_code
+        == 422
+    )
+
+
+def test_profile_email_requires_an_explicit_matching_source(client):
+    headers = pair(client)
+    for context in (
+        {"account_email": "person@example.test"},
+        {"account_source": "browser_profile"},
+        {"account_email": "invalid-email", "account_source": "user_provided"},
+    ):
+        assert (
+            client.post(
+                "/api/browser/heartbeat", json={"profile_context": context}, headers=headers
+            ).status_code
+            == 422
+        )
 
 
 def test_pairing_code_is_one_use_and_limited(client):

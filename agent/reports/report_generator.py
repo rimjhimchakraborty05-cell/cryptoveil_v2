@@ -24,6 +24,7 @@ def describe_event(event: dict) -> str:
         "site_warning": "Suspicious website warning",
         "shadow_ai_network": "Connection to a known AI service observed",
         "shadow_ai_iframe": "Known AI service embedded in a page",
+        "shadow_ai_dom": "AI-related component added to the page",
         "sensitive_field_used": "Sensitive input used",
         "masking_activated": "Visual masking enabled",
         "masking_deactivated": "Visual masking disabled",
@@ -43,12 +44,15 @@ def describe_event(event: dict) -> str:
         "engine.network.dga": "Unusual reverse-DNS hostname (review required)",
         "engine.antiforensic.detected": "Potential evidence-cleanup command observed",
         "engine.mitre.alert": event.get("description", "Suspicious process behaviour"),
+        "engine.correlation.finding": event.get("title", "Related threat observations"),
     }
     return topics.get(event.get("topic"), "Security observation")
 
 
 def next_step(event: dict) -> str:
     topic, kind = event.get("topic", ""), event.get("event_kind", "")
+    if topic == "engine.correlation.finding":
+        return event.get("next_action", "Review the linked evidence records.")
     if kind == "site_warning":
         return "Check the address before entering credentials. Close the page if you do not recognise it."
     if kind.startswith("shadow_ai"):
@@ -104,6 +108,12 @@ def generate_report(
             "summary": describe_event(e["event"]),
             "hostname": e["event"].get("hostname") or e["event"].get("process_name", ""),
             "next_step": next_step(e["event"]),
+            "browser_name": e["event"].get("browser_name", ""),
+            "account_email": e["event"].get("user_email") or "",
+            "account_source": e["event"]
+            .get("detail", {})
+            .get("profile_context", {})
+            .get("account_source", ""),
         }
         for e in selected
     ]
@@ -125,7 +135,19 @@ def generate_report(
             "events_received": len(browser),
             "sites_assessed": len({e.get("hostname") for e in browser if e.get("hostname")}),
             "website_warnings": kinds["site_warning"],
-            "ai_service_observations": kinds["shadow_ai_network"] + kinds["shadow_ai_iframe"],
+            "ai_service_observations": sum(
+                kinds[k] for k in ("shadow_ai_network", "shadow_ai_iframe", "shadow_ai_dom")
+            ),
+            "profiles": list(
+                {
+                    (e.get("detail", {}).get("client_id"), e.get("user_email")): {
+                        "client_id": e.get("detail", {}).get("client_id"),
+                        "browser_name": e.get("browser_name"),
+                        **e.get("detail", {}).get("profile_context", {}),
+                    }
+                    for e in browser
+                }.values()
+            ),
             "visual_masking_events": kinds["masking_activated"],
             "collection_gaps": kinds["collection_gap"],
         },
@@ -142,6 +164,7 @@ def generate_report(
             ),
         },
         "forensic_integrity": integrity,
+        "linked_findings": [e for e in events if e.get("topic") == "engine.correlation.finding"],
         "evidence_index": public_events,
         "evidence": selected,
         "checkpoints": checkpoints,

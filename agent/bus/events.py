@@ -91,6 +91,8 @@ class ProcessSpawnedEvent(BaseEvent):
     parent_exe: str
     username: str
     create_time: float
+    observation_method: str = "process_snapshot"
+    context_complete: bool = True
 
 
 class ProcessTerminatedEvent(BaseEvent):
@@ -176,12 +178,25 @@ class AntiForensicEvent(BaseEvent):
 class BrowserTelemetryEvent(BaseEvent):
     topic: str = "browser.telemetry"
     source: str = "extension"
-    event_kind: str  # site_warning | shadow_ai | obfuscation | interstitial
+    event_kind: str
     hostname: str | None = None
     trust_score: int | None = None
     user_email: str | None = None
     browser_name: str | None = None
     detail: dict[str, Any] = Field(default_factory=dict)
+
+
+class ThreatFindingEvent(BaseEvent):
+    topic: str = "engine.correlation.finding"
+    source: str = "correlation_engine"
+    rule_id: str
+    title: str
+    next_action: str
+    evidence_ids: list[str]
+    mitre_ids: list[str] = Field(default_factory=list)
+    window_seconds: float
+    correlation_basis: str
+    confidence: str = "indicator_requires_review"
 
 
 # ---------------------------------------------------------------------------
