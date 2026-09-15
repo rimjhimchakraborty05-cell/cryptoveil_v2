@@ -18,6 +18,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..bus.event_bus import EventBroker
+from ..engines.correlation_engine import CorrelationEngine
 from ..engines.mitre_engine import MitreEngine
 from ..engines.network_engine import NetworkEngine
 from ..forensics.audit_logger import AuditLogger
@@ -29,6 +30,7 @@ from ..sensors.clipboard_watcher import ClipboardWatcher
 from ..sensors.entropy_watcher import EntropyWatcher
 from ..sensors.process_watcher import ProcessWatcher
 from . import routes
+from .live import LiveUpdates
 from .security import PairingManager, access_guard
 
 log = logging.getLogger("cryptoveil.server")
@@ -116,6 +118,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             audit.attach()
             engine = MitreEngine(broker, settings.rules_path)
             engine.attach()
+            correlation = CorrelationEngine(broker)
+            correlation.attach()
+            live = LiveUpdates()
+            broker.subscribe("*", live.on_event)
             store = ReportStore(settings.data_dir / "reports", audit)
             scheduler = ReportScheduler(
                 audit, store, settings.report_timezone, settings.report_formats
@@ -125,6 +131,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             application.state.broker = broker
             application.state.audit_logger = audit
             application.state.mitre_engine = engine
+            application.state.correlation_engine = correlation
+            application.state.live = live
             application.state.report_store = store
             application.state.scheduler = scheduler
             application.state.pairing = pairing
@@ -161,6 +169,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     except Exception as exc:
                         audit.collection_error = f"Integrity monitor failed: {exc}"
                         log.exception("Integrity monitor failed")
+                    finally:
+                        live.notify()
 
             verification_task = asyncio.create_task(monitor())
             if settings.reports_enabled:
@@ -188,7 +198,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     application = FastAPI(
         title="CryptoVeil",
-        version="2.1.0",
+        version="2.2.0",
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,

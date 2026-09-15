@@ -7,3 +7,4 @@ cryptography>=44,<51
 pyperclip>=1.9,<2
 reportlab>=4.2,<5
 tzdata>=2025.1
+pywin32>=308; sys_platform == "win32"

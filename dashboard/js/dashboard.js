@@ -8,6 +8,7 @@ const state = {
   events: [],
   selected: null,
   polling: false,
+  live: false,
 };
 const titles = {
   overview: "Overview",
@@ -220,7 +221,9 @@ function renderIntegrity(result) {
 function renderStatus(data) {
   state.status = data;
   state.timezone = data.timezone;
-  $("app-status").textContent = "Application online";
+  $("app-status").textContent = state.live
+    ? "Live updates connected"
+    : "Application online · periodic refresh";
   $("app-dot").classList.add("online");
   const integrity = data.integrity;
   const connected = data.clients.filter((c) => c.connected);
@@ -339,7 +342,22 @@ function renderStatus(data) {
         ? `${connected.length} connected browser(s)`
         : "Pair or reopen your extension",
     },
-    ...data.sensors.map((s) => ({ ...s, name: sensorNames[s.name] || s.name })),
+    ...data.sensors.map((s) => ({
+      ...s,
+      name: sensorNames[s.name] || s.name,
+      detail: [
+        s.mode === "windows_wmi_push"
+          ? "Windows process-start events · sampled exit reconciliation"
+          : s.mode === "polling_fallback"
+            ? "Fallback sampling · short-lived processes may be missed"
+            : s.mode === "filesystem_push"
+              ? "Live filesystem events"
+              : "",
+        s.detail,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+    })),
   ];
   if (!data.sensors_enabled)
     rows.push({
@@ -370,7 +388,9 @@ function renderStatus(data) {
           ? "Active"
           : item.status === "starting"
             ? "Starting"
-            : "Unavailable",
+            : item.status === "degraded"
+              ? "Limited coverage"
+              : "Unavailable",
         item.status === "active" ? "good" : "neutral",
       ),
     );
@@ -387,6 +407,14 @@ function renderClients(clients) {
   for (const client of clients) {
     const row = node("div", "paired-row"),
       label = node("div", "", client.name);
+    const profile = client.profile_context || {};
+    label.append(
+      node(
+        "small",
+        "",
+        `${profile.browser_family || "Browser"} · ${profile.account_email || "Email not shared"}${profile.account_source === "user_provided" ? " · manual label" : profile.account_source === "browser_profile" ? " · browser profile" : ""}`,
+      ),
+    );
     label.append(
       node(
         "small",
@@ -474,6 +502,31 @@ function openEvent(event) {
   $("event-time").textContent = timeLabel(event.timestamp, true);
   $("event-hash").textContent = event.hash || "Unavailable";
   $("event-json").textContent = JSON.stringify(event.event, null, 2);
+  const related = $("related-evidence");
+  const evidenceIds = event.event.evidence_ids || [];
+  related.hidden = !evidenceIds.length;
+  related.replaceChildren();
+  if (evidenceIds.length)
+    related.append(
+      node(
+        "p",
+        "fine-print",
+        "Related observations · review together; timing is not proof of causation",
+      ),
+    );
+  for (const id of evidenceIds) {
+    const button = node(
+      "button",
+      "text-button",
+      `Open evidence ${id.slice(0, 8)}`,
+    );
+    button.addEventListener("click", () =>
+      action(button, async () =>
+        openEvent(await api(`/api/events/id/${encodeURIComponent(id)}`)),
+      ),
+    );
+    related.append(button);
+  }
   $("proof-result").textContent = "";
   $("event-dialog").showModal();
 }
@@ -582,6 +635,32 @@ async function poll() {
     state.polling = false;
   }
 }
+let liveConnection, liveRefresh;
+function connectLive() {
+  if (!window.EventSource) return;
+  liveConnection?.close();
+  liveConnection = new EventSource("/api/live");
+  liveConnection.onopen = () => {
+    state.live = true;
+    $("app-status").textContent = "Live updates connected";
+  };
+  liveConnection.onerror = () => {
+    state.live = false;
+    $("app-status").textContent =
+      "Reconnecting live updates · periodic refresh active";
+  };
+  liveConnection.addEventListener("change", () => {
+    if (liveRefresh) return;
+    liveRefresh = setTimeout(() => {
+      liveRefresh = null;
+      poll();
+    }, 250);
+  });
+}
+window.addEventListener("pagehide", () => liveConnection?.close());
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) connectLive();
+});
 document
   .querySelectorAll("[data-view]")
   .forEach((button) =>
@@ -682,8 +761,9 @@ $("demo-button").addEventListener("click", (event) =>
     await bootstrap();
     selectView(location.hash.slice(1) || "overview");
     await poll();
+    connectLive();
   } catch (e) {
     showError(e);
   }
-  setInterval(poll, 4000);
+  setInterval(poll, 10000);
 })();

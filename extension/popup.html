@@ -63,6 +63,39 @@
       <p id="delivery-note" class="note"></p>
       <button id="retry-button" class="secondary">Retry delivery</button>
     </section>
+    <details id="account-panel" hidden>
+      <summary>Connected browser and account</summary>
+      <p id="account-status" class="note"></p>
+      <p class="note">
+        Optionally attach your profile email to future evidence and reports.
+        This does not read your inbox. Existing evidence keeps its original
+        label.
+      </p>
+      <button id="profile-account" type="button" class="secondary">
+        Use browser profile email
+      </button>
+      <form id="account-form">
+        <label
+          >Email label<input
+            id="account-email"
+            type="email"
+            maxlength="254"
+            autocomplete="off"
+            required
+            placeholder="name@example.com"
+        /></label>
+        <button id="manual-account" type="submit">
+          Save manual email label
+        </button>
+      </form>
+      <button id="clear-account" type="button" class="secondary">
+        Stop sharing account email
+      </button>
+      <p class="note">
+        A manual label is not verified sign-in. Each browser profile must be
+        paired separately; your search engine does not affect collection.
+      </p>
+    </details>
     <section class="site">
       <h2>Current website</h2>
       <strong id="site-name">—</strong>

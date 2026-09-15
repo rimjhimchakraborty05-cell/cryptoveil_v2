@@ -3,18 +3,10 @@
   "use strict";
   const sensitiveName =
     /password|passwd|credit.?card|cvv|cvc|ssn|secret|token/i;
-  const aiDomains = [
-    "chatgpt.com",
-    "claude.ai",
-    "perplexity.ai",
-    "sider.ai",
-    "merlin.foyer.work",
-    "monica.im",
-    "harpa.ai",
-  ];
   const seen = new WeakSet(),
-    iframes = new WeakSet(),
+    signals = new WeakMap(),
     originalStyles = new WeakMap();
+  const signalTimes = new Map();
   let masked = false,
     banner = null;
   const isSensitive = (element) =>
@@ -71,22 +63,32 @@
         { once: true },
       );
     }
-    if (element instanceof HTMLIFrameElement && !iframes.has(element)) {
-      let host;
-      try {
-        host = new URL(element.src, location.href).hostname;
-      } catch {
-        return;
-      }
-      if (aiDomains.some((d) => host === d || host.endsWith(`.${d}`))) {
-        iframes.add(element);
-        send({ type: "shadow_ai_iframe", ai_domain: host });
+    const signal = CryptoVeilSignals.classify(
+      element.tagName,
+      element.getAttribute?.("src"),
+      element.getAttribute?.("data-ai-provider"),
+      location.href,
+    );
+    if (signal) {
+      const key = JSON.stringify(signal),
+        now = Date.now();
+      if (
+        signals.get(element) !== key &&
+        now - (signalTimes.get(key) || 0) > 60000
+      ) {
+        signals.set(element, key);
+        signalTimes.set(key, now);
+        if (signalTimes.size > 100)
+          signalTimes.delete(signalTimes.keys().next().value);
+        send(signal);
       }
     }
   }
   function inspectTree(root) {
     if (root.nodeType === 1) inspect(root);
-    root.querySelectorAll?.("input,textarea,iframe").forEach(inspect);
+    root
+      .querySelectorAll?.("input,textarea,iframe,script,[data-ai-provider]")
+      .forEach(inspect);
   }
   const observer = new MutationObserver((changes) => {
     for (const change of changes) {
@@ -98,7 +100,7 @@
     childList: true,
     subtree: true,
     attributes: true,
-    attributeFilter: ["type", "src"],
+    attributeFilter: ["type", "src", "data-ai-provider"],
   });
   inspectTree(document);
   function warning(reasons) {
