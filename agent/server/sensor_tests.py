@@ -58,13 +58,20 @@ class SensorTestRunner:
         while time.monotonic() < deadline:
             entry = await asyncio.to_thread(self._find_event, predicate)
             if entry is not None:
-                return entry
+                return entry, time.monotonic()
             await asyncio.sleep(0.1)
-        return None
+        return None, time.monotonic()
 
     @staticmethod
-    def _result(name: str, expected: str, entry: dict | None, started: float, detail: str) -> dict:
-        elapsed = round((time.monotonic() - started) * 1000)
+    def _result(
+        name: str,
+        expected: str,
+        entry: dict | None,
+        started: float,
+        observed_at: float,
+        detail: str,
+    ) -> dict:
+        elapsed = round((observed_at - started) * 1000)
         event = entry.get("event", {}) if entry else {}
         return {
             "mode": "real_sensor_test",
@@ -95,7 +102,7 @@ class SensorTestRunner:
                 creationflags=creationflags,
             )
             try:
-                entry = await self._wait_for(
+                entry, observed_at = await self._wait_for(
                     lambda event: event.get("topic") == "sensor.process.spawned"
                     and marker in event.get("cmdline", ""),
                     timeout=7.0,
@@ -111,6 +118,7 @@ class SensorTestRunner:
                 "sensor.process.spawned",
                 entry,
                 started,
+                observed_at,
                 "A harmless short-lived process was created and detected by the normal process sensor.",
             )
 
@@ -134,7 +142,7 @@ class SensorTestRunner:
                     await asyncio.to_thread(target.write_bytes, os.urandom(4096))
                     await asyncio.sleep(0.08)
 
-                entry = await self._wait_for(
+                entry, observed_at = await self._wait_for(
                     lambda event: event.get("topic") == "sensor.filesystem.entropy"
                     and bool(event.get("burst_triggered"))
                     and str(directory) in event.get("file_path", ""),
@@ -148,6 +156,7 @@ class SensorTestRunner:
                 "sensor.filesystem.entropy with burst_triggered=true",
                 entry,
                 started,
+                observed_at,
                 "Temporary high-entropy files were created in a dedicated test folder and removed after the real sensor check.",
             )
 
