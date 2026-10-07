@@ -125,6 +125,7 @@ function selectView(view) {
   $("breadcrumb").textContent = `Workspace / ${titles[view]}`;
   history.replaceState(null, "", `#${view}`);
   if (view === "activity") loadActivity().catch(showError);
+  if (view === "evidence") loadDailyEvidence().catch(showError);
   if (view === "reports") loadReports().catch(showError);
 }
 function renderIntegrity(result) {
@@ -530,6 +531,116 @@ function openEvent(event) {
   $("proof-result").textContent = "";
   $("event-dialog").showModal();
 }
+async function loadDailyEvidence() {
+  const data = await api("/api/evidence/daily");
+  const tbody = $("daily-evidence-body");
+  tbody.replaceChildren();
+  $("daily-evidence-empty").hidden = !!data.days.length;
+
+  const archive = data.archive || {};
+  $("archive-trust-note").textContent = archive.host_separation_verified
+    ? "Archive separation verified by the configured evidence backend."
+    : archive.note ||
+      "This archive is currently a filesystem reference copy. Use independently managed storage for protection against full host compromise.";
+
+  for (const day of data.days) {
+    const row = node("tr");
+    const date = node("td");
+    date.append(
+      node("strong", "", day.date),
+      day.generated_at
+        ? node(
+            "small",
+            "",
+            `Sealed snapshot saved ${new Date(day.generated_at).toLocaleTimeString()}`,
+          )
+        : node("small", "", "Signed daily snapshot"),
+    );
+
+    const bundle = node("td");
+    bundle.append(
+      badge(
+        day.signature_verified ? "Signed" : "Signature issue",
+        day.signature_verified ? "good" : "bad",
+      ),
+    );
+
+    const integrity = node("td");
+    integrity.append(
+      badge(
+        day.verified ? "VERIFIED" : "NEEDS REVIEW",
+        day.verified ? "good" : "bad",
+      ),
+    );
+    if (!day.verified && day.issues?.length)
+      integrity.append(node("small", "", day.issues.join("; ")));
+
+    const actions = node("td");
+    const verifyButton = node("button", "text-button", "Verify");
+    verifyButton.addEventListener("click", () =>
+      action(verifyButton, async () => {
+        const result = await api(
+          `/api/evidence/daily/${encodeURIComponent(day.date)}/verify`,
+        );
+        toast(
+          result.verified
+            ? `${day.date} evidence bundle verified.`
+            : `${day.date} evidence needs review.`,
+        );
+        await loadDailyEvidence();
+      }),
+    );
+
+    const jsonButton = node("button", "text-button", "JSON ↓");
+    jsonButton.disabled = !day.verified;
+    jsonButton.addEventListener("click", () =>
+      action(jsonButton, () => downloadDailyEvidence(day.date, "json")),
+    );
+
+    const zipButton = node("button", "text-button", "Evidence ZIP ↓");
+    zipButton.disabled = !day.verified;
+    zipButton.addEventListener("click", () =>
+      action(zipButton, () => downloadDailyEvidence(day.date, "zip")),
+    );
+
+    actions.append(verifyButton, node("span", "action-separator", "·"), jsonButton, node("span", "action-separator", "·"), zipButton);
+
+    row.append(
+      date,
+      node("td", "", number(day.event_count)),
+      bundle,
+      integrity,
+      actions,
+    );
+    tbody.append(row);
+  }
+}
+
+async function downloadDailyEvidence(date, format) {
+  const res = await fetch(
+    `/api/evidence/daily/${encodeURIComponent(date)}/download?format=${encodeURIComponent(format)}`,
+    { cache: "no-store" },
+  );
+  if (!res.ok) {
+    let data = {};
+    try {
+      data = await res.json();
+    } catch {}
+    throw new Error(errorText(data));
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const a = node("a");
+  a.href = url;
+  a.download =
+    format === "zip"
+      ? `cryptoveil_evidence_${date}.zip`
+      : `cryptoveil_${date}.json`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 async function loadReports() {
   const data = await api("/api/reports"),
     tbody = $("reports-body");
@@ -738,6 +849,10 @@ $("proof-button").addEventListener("click", (event) =>
     "proof-result",
   ),
 );
+$("refresh-daily-evidence").addEventListener("click", (event) =>
+  action(event.currentTarget, () => loadDailyEvidence()),
+);
+
 $("demo-button").addEventListener("click", (event) =>
   action(event.currentTarget, async () => {
     const data = await api("/api/forensics/demo", {});
