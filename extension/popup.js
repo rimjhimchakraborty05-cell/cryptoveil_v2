@@ -1,64 +1,142 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
+
 async function message(payload) {
   const result = await chrome.runtime.sendMessage(payload);
   if (result?.error) throw new Error(result.error);
   return result;
 }
-async function refresh() {
-  const data = await message({ type: "cv_status" }),
-    recent = Date.now() - (data.status.updated_at || 0) < 90000;
-  $("pair-form").hidden = data.paired;
-  $("paired-panel").hidden = !data.paired;
-  $("account-panel").hidden = !data.paired;
-  const profile = data.profile_context || {};
-  const sources = {
-    browser_profile: "Reported by browser profile",
-    user_provided: "Manual label · not verified sign-in",
-    unavailable: "Profile email unavailable · you can enter a manual label",
-    not_shared: "Account email not shared",
-  };
-  $("account-status").textContent =
-    `${profile.browser_family || "Browser"} · ${profile.account_email || "No email attached"} · ${sources[profile.account_source] || sources.not_shared}`;
-  $("mask-toggle").checked = data.masking;
-  $("app-url").value = data.app_url;
-  const online = data.paired && recent && data.status.online;
-  $("connection").textContent = !data.paired
-    ? "Pair this extension to start delivery"
-    : data.status.collection_paused
-      ? "Collection paused — review evidence in the app"
-      : online
-        ? "Connected · evidence is acknowledged after saving"
-        : "Application offline · evidence stays queued";
-  $("connection").classList.toggle(
-    "error",
-    !online || data.status.collection_paused,
-  );
-  $("browser-label").textContent = data.name || "Your browser";
-  $("queued").textContent = data.queue_count;
-  $("saved").textContent = data.last_receipt
-    ? `#${data.last_receipt.seq}`
-    : "—";
-  $("delivery-note").textContent = data.dropped_total
-    ? `${data.dropped_total} observations could not be queued because the offline queue filled. A collection-gap event will be sent when delivery resumes.`
-    : data.status.last_error ||
-      "Queued evidence is removed only after the app confirms durable storage.";
-  if (data.legacy_count)
-    $("delivery-note").textContent +=
-      ` ${data.legacy_count} legacy messages are retained in extension storage for review.`;
+
+function setState(id, text, tone = "neutral") {
+  const target = $(id);
+  target.textContent = text;
+  target.className = `status-value ${tone}`;
 }
+
+function verdict(score) {
+  if (!Number.isFinite(score)) return { label: "Unavailable", tone: "neutral" };
+  if (score >= 80) return { label: "SAFE", tone: "good" };
+  if (score >= 50) return { label: "CAUTION", tone: "warn" };
+  return { label: "HIGH RISK", tone: "bad" };
+}
+
+async function currentPageStatus() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.url || !/^https?:/.test(tab.url)) {
+    return { supported: false };
+  }
+
+  const host = new URL(tab.url).hostname;
+  const trust = await message({ type: "cv_get_page_settings", url: tab.url });
+
+  let page = null;
+  try {
+    page = await chrome.tabs.sendMessage(tab.id, { type: "cv_page_status" });
+  } catch {
+    // Restricted pages and pages still loading may not have a content script yet.
+  }
+
+  return {
+    supported: true,
+    host,
+    score: trust.score,
+    reasons: trust.reasons || [],
+    sensitive_fields_detected: Number.isInteger(page?.sensitive_fields_detected)
+      ? page.sensitive_fields_detected
+      : null,
+    shadow_ai_monitoring: true,
+  };
+}
+
+async function refresh() {
+  const data = await message({ type: "cv_status" });
+  const recent = Date.now() - (data.status.updated_at || 0) < 90000;
+  const online = Boolean(data.paired && recent && data.status.online);
+
+  $("pair-form").hidden = data.paired;
+  $("security-panel").hidden = !data.paired;
+  $("app-url").value = data.app_url;
+
+  if (!data.paired) return;
+
+  setState(
+    "extension-status",
+    data.status.collection_paused
+      ? "Paused"
+      : online
+        ? "Connected"
+        : "App offline",
+    data.status.collection_paused ? "bad" : online ? "good" : "warn",
+  );
+
+  setState(
+    "auth-status",
+    online ? "Authenticated" : "Not verified now",
+    online ? "good" : "warn",
+  );
+
+  $("connection-note").textContent = data.status.collection_paused
+    ? "Evidence collection is paused because the desktop application reported an integrity or storage problem."
+    : online
+      ? "The paired desktop application is responding and authenticated delivery is available."
+      : "The browser is paired, but the desktop application is not currently responding.";
+
+  const page = await currentPageStatus();
+  if (!page.supported) {
+    $("site-name").textContent = "This browser page is not monitored";
+    $("site-score-number").textContent = "—";
+    $("site-score-text").textContent =
+      "Open a normal HTTP or HTTPS website to view the CryptoVeil trust score.";
+    $("site-verdict").textContent = "Unavailable";
+    $("site-verdict").className = "verdict neutral";
+    $("score-ring").className = "score-ring neutral";
+    setState("sensitive-status", "Unavailable", "neutral");
+    setState("shadow-status", "Unavailable", "neutral");
+    return;
+  }
+
+  $("site-name").textContent = page.host;
+  $("site-score-number").textContent = page.score;
+  const result = verdict(page.score);
+  $("site-verdict").textContent = result.label;
+  $("site-verdict").className = `verdict ${result.tone}`;
+  $("score-ring").className = `score-ring ${result.tone}`;
+  $("site-score-text").textContent = page.reasons.length
+    ? page.reasons[0]
+    : "No strong local hostname risk indicator was found.";
+
+  if (page.sensitive_fields_detected === null) {
+    setState("sensitive-status", "Checking page", "neutral");
+  } else if (page.sensitive_fields_detected > 0) {
+    setState(
+      "sensitive-status",
+      `${page.sensitive_fields_detected} detected`,
+      "warn",
+    );
+  } else {
+    setState("sensitive-status", "None detected", "good");
+  }
+
+  setState(
+    "shadow-status",
+    page.shadow_ai_monitoring ? "Active" : "Inactive",
+    page.shadow_ai_monitoring ? "good" : "neutral",
+  );
+}
+
 async function run(button, work) {
   button.disabled = true;
   $("message").textContent = "";
   try {
     await work();
     await refresh();
-  } catch (e) {
-    $("message").textContent = e.message;
+  } catch (error) {
+    $("message").textContent = error.message;
   } finally {
     button.disabled = false;
   }
 }
+
 $("pair-form").addEventListener("submit", (event) => {
   event.preventDefault();
   run($("pair-button"), () =>
@@ -70,75 +148,17 @@ $("pair-form").addEventListener("submit", (event) => {
     }),
   );
 });
-$("retry-button").addEventListener("click", (event) =>
-  run(event.currentTarget, () => message({ type: "cv_retry" })),
-);
-$("profile-account").addEventListener("click", (event) => {
-  // Request directly during the user gesture, before any asynchronous work.
-  const permission = chrome.permissions.request({
-    permissions: ["identity", "identity.email"],
-  });
-  run(event.currentTarget, async () => {
-    if (!(await permission))
-      throw new Error(
-        "Email permission was not granted. You can use a manual label.",
-      );
-    await message({ type: "cv_identity_set", mode: "profile" });
-  });
-});
-$("account-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  run($("manual-account"), async () => {
-    await message({
-      type: "cv_identity_set",
-      mode: "manual",
-      email: $("account-email").value,
-    });
-    $("account-email").value = "";
-  });
-});
-$("clear-account").addEventListener("click", (event) =>
-  run(event.currentTarget, async () => {
-    await message({ type: "cv_identity_set", mode: "none" });
-    await chrome.permissions.remove({
-      permissions: ["identity", "identity.email"],
-    });
-  }),
-);
+
 $("open-app").addEventListener("click", (event) =>
   run(event.currentTarget, () => message({ type: "cv_open_app" })),
 );
-$("mask-toggle").addEventListener("change", (event) =>
-  run(event.currentTarget, () =>
-    message({ type: "cv_masking", active: event.currentTarget.checked }),
-  ),
-);
+
 (async () => {
   try {
     await refresh();
-    const [tab] = await chrome.tabs.query({
-      active: true,
-      currentWindow: true,
-    });
-    if (tab?.url && /^https?:/.test(tab.url)) {
-      const host = new URL(tab.url).hostname;
-      $("site-name").textContent = host;
-      const result = await message({
-        type: "cv_get_page_settings",
-        url: tab.url,
-      });
-      $("site-score").textContent =
-        `Local risk estimate: ${result.score}/100 · ${result.score < 65 ? "Review this address" : "Few local risk signals"}`;
-      $("site-reasons").replaceChildren(
-        ...result.reasons.map((text) => {
-          const li = document.createElement("li");
-          li.textContent = text;
-          return li;
-        }),
-      );
-    }
-  } catch (e) {
-    $("message").textContent = e.message;
+  } catch (error) {
+    $("message").textContent = error.message;
   }
 })();
+
 setInterval(() => refresh().catch(() => {}), 3000);
