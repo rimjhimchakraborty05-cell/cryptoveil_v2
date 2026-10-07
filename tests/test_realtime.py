@@ -8,7 +8,12 @@ import time
 import pytest
 
 from agent.bus.event_bus import EventBroker
-from agent.bus.events import BrowserTelemetryEvent, FileEntropyEvent, MitreAlertEvent
+from agent.bus.events import (
+    BrowserTelemetryEvent,
+    FileEntropyEvent,
+    MitreAlertEvent,
+    ProcessSpawnedEvent,
+)
 from agent.engines.correlation_engine import CorrelationEngine
 from agent.engines.mitre_engine import MitreEngine
 from agent.forensics.audit_logger import AuditLogger
@@ -218,6 +223,74 @@ def test_only_wmi_timeout_is_treated_as_idle():
     assert is_wmi_timeout(Error())
     Error.excepinfo = (0, None, None, None, 0, -2147024891)
     assert not is_wmi_timeout(Error())
+
+
+def test_live_process_graph_exposes_stored_mitre_alert_identity(tmp_path):
+    async def run():
+        rules = tmp_path / "rules.json"
+        rules.write_text(
+            json.dumps(
+                {
+                    "rules": [
+                        {
+                            "id": "office-shell",
+                            "mitre_id": "T1059",
+                            "mitre_name": "Command and Scripting Interpreter",
+                            "severity": "high",
+                            "description": "Office launched a shell",
+                            "conditions": {
+                                "process_name_in": ["powershell.exe"],
+                                "parent_name_in": ["winword.exe"],
+                            },
+                        }
+                    ]
+                }
+            )
+        )
+        broker = EventBroker()
+        audit = AuditLogger(broker, tmp_path / "data", EvidenceArchive(tmp_path / "archive"))
+        audit.attach()
+        engine = MitreEngine(broker, rules)
+        engine.attach()
+
+        await broker.publish(
+            ProcessSpawnedEvent(
+                pid=22,
+                name="winword.exe",
+                exe="C:/Program Files/Microsoft Office/winword.exe",
+                cmdline="winword.exe document.docx",
+                ppid=10,
+                parent_name="explorer.exe",
+                parent_exe="C:/Windows/explorer.exe",
+                username="user",
+                create_time=time.time(),
+            )
+        )
+        await broker.publish(
+            ProcessSpawnedEvent(
+                pid=23,
+                name="powershell.exe",
+                exe="C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+                cmdline="powershell.exe -NoProfile",
+                ppid=22,
+                parent_name="winword.exe",
+                parent_exe="C:/Program Files/Microsoft Office/winword.exe",
+                username="user",
+                create_time=time.time(),
+            )
+        )
+
+        graph = engine.graph()
+        flagged = next(node for node in graph["nodes"] if node["pid"] == 23)
+        assert graph["flagged_processes"] == 1
+        assert flagged["mitre_id"] == "T1059"
+        assert flagged["severity"] == "high"
+        assert flagged["alert_event_id"]
+        stored = audit.entry_by_id(flagged["alert_event_id"])
+        assert stored["event"]["topic"] == "engine.mitre.alert"
+        assert stored["event"]["rule_id"] == "office-shell"
+
+    asyncio.run(run())
 
 
 def test_rule_dsl_rejects_unknown_conditions_instead_of_matching_every_process(tmp_path):
