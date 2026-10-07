@@ -394,6 +394,44 @@ def process_graph(request: Request):
     return request.app.state.mitre_engine.graph()
 
 
+@router.get("/api/evidence/daily")
+def daily_evidence(request: Request):
+    audit = request.app.state.audit_logger
+    return {
+        "archive": audit.archive.describe(),
+        "days": request.app.state.report_store.list_reports(),
+    }
+
+
+@router.get("/api/evidence/daily/{date}/verify")
+def verify_daily_evidence(date: str, request: Request):
+    try:
+        return request.app.state.report_store.verify(valid_date(date))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.get("/api/evidence/daily/{date}/download")
+def download_daily_evidence(
+    date: str,
+    request: Request,
+    format: Literal["zip", "json"] = "zip",
+):
+    try:
+        data, media_type, filename = request.app.state.report_store.download(
+            valid_date(date), format
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except IntegrityError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return Response(
+        data,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/api/reports")
 def reports(request: Request):
     return {"reports": request.app.state.report_store.list_reports()}
