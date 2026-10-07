@@ -143,6 +143,72 @@ function sensorPresentation(sensor, activeText = "Active") {
   if (sensor.status === "degraded") return { text: "Limited", tone: "warn" };
   return { text: "Unavailable", tone: "bad" };
 }
+function setSetupStep(iconId, textId, complete, message) {
+  const icon = $(iconId);
+  icon.classList.toggle("complete", complete);
+  icon.textContent = complete ? "✓" : icon.dataset.step || icon.textContent;
+  $(textId).textContent = message;
+}
+function renderFirstRun(data, connected, integrity) {
+  const process = sensorByName(data, "ProcessWatcher");
+  const network = sensorByName(data, "NetworkEngine");
+  const entropy = sensorByName(data, "EntropyWatcher");
+  const clipboard = sensorByName(data, "ClipboardWatcher");
+  const monitored = [process, network, entropy, clipboard].filter(Boolean);
+  const acceptable = monitored.filter((sensor) =>
+    ["active", "degraded"].includes(sensor.status),
+  );
+
+  const appReady = integrity.verified && !data.collection_paused;
+  const browserReady = connected.length > 0;
+  const monitoringReady =
+    data.sensors_enabled &&
+    monitored.length > 0 &&
+    acceptable.length === monitored.length &&
+    integrity.verified;
+
+  setSetupStep(
+    "setup-app-icon",
+    "setup-app-text",
+    appReady,
+    appReady
+      ? "Local protection services and evidence verification are ready."
+      : data.collection_paused
+        ? "Evidence collection is paused. Review the integrity warning first."
+        : "Waiting for the evidence baseline to verify.",
+  );
+  setSetupStep(
+    "setup-browser-icon",
+    "setup-browser-text",
+    browserReady,
+    browserReady
+      ? `${connected.length} browser${connected.length === 1 ? "" : "s"} connected and sending authenticated status.`
+      : data.clients.length
+        ? "A browser is paired but currently offline. Open it and check the extension."
+        : "Pair the CryptoVeil extension once using the one-use code.",
+  );
+  setSetupStep(
+    "setup-monitoring-icon",
+    "setup-monitoring-text",
+    monitoringReady,
+    monitoringReady
+      ? "Endpoint monitoring and evidence integrity are ready."
+      : !data.sensors_enabled
+        ? "Endpoint sensors are disabled in this application session."
+        : "Waiting for endpoint monitoring to become ready.",
+  );
+
+  const completeCount = [appReady, browserReady, monitoringReady].filter(Boolean).length;
+  setBadge(
+    "first-run-progress",
+    completeCount === 3 ? "Setup complete" : `${completeCount} of 3 ready`,
+    completeCount === 3 ? "good" : completeCount ? "warn" : "neutral",
+  );
+  $("first-run-card").hidden = completeCount === 3;
+  $("setup-connect-browser").hidden = browserReady;
+  $("setup-open-lab").hidden = !appReady || monitoringReady;
+}
+
 function renderProtectionStatus(data, connected, integrity) {
   const process = sensorByName(data, "ProcessWatcher");
   const network = sensorByName(data, "NetworkEngine");
@@ -334,6 +400,7 @@ function renderStatus(data) {
   const integrity = data.integrity;
   const connected = data.clients.filter((c) => c.connected);
   renderProtectionStatus(data, connected, integrity);
+  renderFirstRun(data, connected, integrity);
   $("metric-evidence").textContent = number(
     Math.max(data.total_events, integrity.expected_events || 0),
   );
@@ -1275,6 +1342,14 @@ async function poll() {
       "Live verification is unavailable.",
       "The hashes shown are from the last successful connection.",
     );
+    $("first-run-card").hidden = false;
+    setBadge("first-run-progress", "Application offline", "bad");
+    setSetupStep(
+      "setup-app-icon",
+      "setup-app-text",
+      false,
+      "Reopen CryptoVeil to continue setup and protection.",
+    );
   } finally {
     state.polling = false;
   }
@@ -1322,9 +1397,12 @@ document
   .forEach((button) =>
     button.addEventListener("click", () => $(button.dataset.close).close()),
   );
-$("connect-button").addEventListener("click", () =>
-  $("connect-dialog").showModal(),
-);
+function openConnectDialog() {
+  $("connect-dialog").showModal();
+}
+$("connect-button").addEventListener("click", openConnectDialog);
+$("setup-connect-browser").addEventListener("click", openConnectDialog);
+$("setup-open-lab").addEventListener("click", () => selectView("lab"));
 $("pair-code-button").addEventListener("click", (event) =>
   action(
     event.currentTarget,
