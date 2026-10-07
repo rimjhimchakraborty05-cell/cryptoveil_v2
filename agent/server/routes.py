@@ -16,6 +16,7 @@ from ..bus.events import BrowserTelemetryEvent, EventSeverity
 from ..forensics.audit_logger import AuditLogger, IntegrityError
 from ..reports.report_generator import describe_event, next_step
 from ..reports.store import valid_date
+from ..version import VERSION
 from .sensor_tests import SensorTestUnavailable
 
 router = APIRouter()
@@ -27,7 +28,7 @@ class StrictPayload(BaseModel):
 
 @router.get("/api/health")
 def health():
-    return {"status": "ok", "service": "cryptoveil-agent", "version": "2.2.0"}
+    return {"status": "ok", "service": "cryptoveil-agent", "version": VERSION}
 
 
 @router.get("/api/session")
