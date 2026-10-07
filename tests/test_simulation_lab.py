@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from agent.server.main import Settings, create_app
+from agent.server.sensor_tests import SensorTestRunner
 
 
 def dashboard(client):
@@ -96,3 +97,22 @@ def test_isolated_simulation_never_changes_live_evidence(tmp_path):
             False,
         ]
         assert audit.stats()["total_events"] == before
+
+
+def test_sensor_latency_uses_detection_time_not_cleanup_time():
+    result = SensorTestRunner._result(
+        "Process sensor",
+        "sensor.process.spawned",
+        {
+            "seq": 3,
+            "event": {
+                "event_id": "11111111-1111-4111-8111-111111111111",
+                "topic": "sensor.process.spawned",
+            },
+        },
+        10.0,
+        10.123,
+        "Detected.",
+    )
+    assert result["latency_ms"] == 123
+    assert result["passed"] is True
