@@ -267,6 +267,40 @@
               pauses new collection after an integrity failure.
             </p>
           </article>
+          <article class="panel daily-evidence-panel">
+            <div class="panel-heading">
+              <div>
+                <span class="eyebrow">DATE-WISE OFF-HOST EVIDENCE</span>
+                <h2>Evidence by day</h2>
+                <p>
+                  Download the signed evidence bundle for a specific day or
+                  verify that day before export.
+                </p>
+              </div>
+              <button class="button secondary" id="refresh-daily-evidence">
+                Refresh
+              </button>
+            </div>
+            <div id="archive-trust-note" class="archive-trust-note"></div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Date</th>
+                    <th scope="col">Events</th>
+                    <th scope="col">Signed bundle</th>
+                    <th scope="col">Integrity</th>
+                    <th scope="col">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="daily-evidence-body"></tbody>
+              </table>
+            </div>
+            <p class="empty-state" id="daily-evidence-empty" hidden>
+              No date-wise evidence bundles have been saved yet.
+            </p>
+          </article>
+
           <div class="overview-grid evidence-bottom">
             <article class="panel">
               <h2>Evidence archive</h2>
