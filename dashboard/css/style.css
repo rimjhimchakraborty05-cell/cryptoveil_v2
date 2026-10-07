@@ -1458,3 +1458,35 @@ body[data-mode="simple"] .threat-metrics .metric small {
     width: 100%;
   }
 }
+
+
+/* Analyst runtime readiness */
+.runtime-panel {
+  margin-bottom: 24px;
+}
+.runtime-checks {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 16px;
+}
+.runtime-check {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fbfafc;
+  font-size: 11px;
+}
+@media (max-width: 900px) {
+  .runtime-checks {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+@media (max-width: 600px) {
+  .runtime-checks {
+    grid-template-columns: 1fr;
+  }
+}
