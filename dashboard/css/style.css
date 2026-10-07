@@ -1258,3 +1258,113 @@ body[data-mode="simple"] .analyst-only {
 .related-evidence .text-button {
   margin-right: 12px;
 }
+
+
+/* Threat investigation */
+.investigation-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.8fr);
+  gap: 24px;
+  margin-bottom: 24px;
+}
+.process-graph-wrap {
+  min-height: 190px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background:
+    linear-gradient(rgba(114, 81, 168, 0.025), rgba(114, 81, 168, 0.025)),
+    #fcfbfd;
+  overflow: auto;
+}
+#process-graph-svg {
+  width: 100%;
+  min-width: 620px;
+  display: block;
+}
+.process-edge {
+  stroke: #cfc4d8;
+  stroke-width: 2;
+}
+.process-node rect {
+  fill: #ffffff;
+  stroke: #d8d0df;
+  stroke-width: 1.4;
+}
+.process-node.flagged rect {
+  fill: #fff7ea;
+  stroke: #c98b3f;
+  stroke-width: 2;
+}
+.process-node.interactive {
+  cursor: pointer;
+}
+.process-node.interactive:focus rect {
+  stroke: #7251a8;
+  stroke-width: 3;
+}
+.process-node-name {
+  fill: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+.process-node-meta {
+  fill: #756d7b;
+  font-size: 9px;
+}
+.technique-list {
+  display: grid;
+}
+.technique-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 0;
+  border-top: 1px solid var(--line);
+}
+.technique-row:first-child {
+  border-top: 0;
+}
+.technique-row strong {
+  display: block;
+  font-size: 12px;
+}
+.technique-row small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.findings-panel {
+  padding: 0;
+  overflow: hidden;
+}
+.findings-panel .panel-heading {
+  padding: 24px 25px 5px;
+}
+.findings-panel .empty-state {
+  border-top: 1px solid var(--line);
+}
+.threat-metrics .metric strong {
+  line-height: 1.45;
+}
+body[data-mode="simple"] .threat-metrics .metric small {
+  display: none;
+}
+
+@media (max-width: 1000px) {
+  .investigation-grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 600px) {
+  .sidebar nav {
+    grid-template-columns: repeat(5, 1fr);
+  }
+  .nav-item {
+    font-size: 9px;
+  }
+  .threat-metrics {
+    grid-template-columns: 1fr 1fr;
+  }
+}
