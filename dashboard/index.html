@@ -21,7 +21,7 @@
           data-view="overview"
           aria-current="page"
         >
-          <span aria-hidden="true">◫</span> Overview
+          <span aria-hidden="true">◫</span> Command Center
         </button>
         <button class="nav-item" data-view="activity">
           <span aria-hidden="true">≋</span> Activity
@@ -47,8 +47,16 @@
     </aside>
     <div class="workspace">
       <header class="topbar">
-        <span id="breadcrumb">Workspace / Overview</span>
+        <span id="breadcrumb">Workspace / Command Center</span>
         <div>
+          <div class="mode-switch" role="group" aria-label="Interface detail level">
+            <button id="mode-simple" class="mode-button active" aria-pressed="true">
+              Simple
+            </button>
+            <button id="mode-analyst" class="mode-button" aria-pressed="false">
+              Analyst
+            </button>
+          </div>
           <span class="date-label" id="today-label"></span
           ><button class="button secondary" id="connect-button">
             Connect browser <span aria-hidden="true">↗</span>
@@ -64,9 +72,9 @@
         >
           <div class="page-heading">
             <div>
-              <span class="eyebrow">YOUR SECURITY AT A GLANCE</span>
-              <h1 id="overview-title">A clearer view of your security.</h1>
-              <p>See what needs attention. Keep evidence you can verify.</p>
+              <span class="eyebrow">LIVE COMMAND CENTER</span>
+              <h1 id="overview-title">Your protection status.</h1>
+              <p>Understand what is protected, what needs attention, and whether your evidence is trustworthy.</p>
             </div>
             <span class="badge neutral" id="overview-badge"
               >Checking status</span
@@ -76,6 +84,103 @@
             <strong>Getting ready</strong>
             <p>Waiting for the application to report its status.</p>
           </div>
+          <section class="protection-grid" aria-label="Protection status">
+            <article class="protection-item">
+              <span class="protection-icon" aria-hidden="true">B</span>
+              <div>
+                <strong>Browser Protection</strong>
+                <small>Paired browser telemetry and website trust checks</small>
+              </div>
+              <span id="protect-browser" class="badge neutral">Checking</span>
+            </article>
+            <article class="protection-item">
+              <span class="protection-icon" aria-hidden="true">E</span>
+              <div>
+                <strong>Endpoint Monitoring</strong>
+                <small>Process, file, clipboard, and network sensors</small>
+              </div>
+              <span id="protect-endpoint" class="badge neutral">Checking</span>
+            </article>
+            <article class="protection-item">
+              <span class="protection-icon" aria-hidden="true">R</span>
+              <div>
+                <strong>Ransomware Monitoring</strong>
+                <small>File entropy and burst-behavior observation</small>
+              </div>
+              <span id="protect-ransomware" class="badge neutral">Checking</span>
+            </article>
+            <article class="protection-item">
+              <span class="protection-icon" aria-hidden="true">C</span>
+              <div>
+                <strong>Clipboard Protection</strong>
+                <small>Clipboard transition monitoring without storing text</small>
+              </div>
+              <span id="protect-clipboard" class="badge neutral">Checking</span>
+            </article>
+            <article class="protection-item">
+              <span class="protection-icon" aria-hidden="true">AI</span>
+              <div>
+                <strong>Shadow AI Monitoring</strong>
+                <small>Known AI-service and page-component observations</small>
+              </div>
+              <span id="protect-shadow" class="badge neutral">Checking</span>
+            </article>
+            <article class="protection-item">
+              <span class="protection-icon" aria-hidden="true">V</span>
+              <div>
+                <strong>Evidence Integrity</strong>
+                <small>Hash-chain, Merkle, and signature verification</small>
+              </div>
+              <span id="protect-evidence" class="badge neutral">Checking</span>
+            </article>
+          </section>
+
+          <article class="panel pipeline-panel">
+            <div class="panel-heading">
+              <div>
+                <span class="eyebrow">LIVE SECURITY PIPELINE</span>
+                <h2>From activity to verified evidence</h2>
+                <p>Each stage reflects the current application state, not a demo value.</p>
+              </div>
+            </div>
+            <div class="pipeline" aria-label="CryptoVeil live processing pipeline">
+              <div class="pipeline-stage">
+                <span class="pipeline-label">Browser</span>
+                <strong>Telemetry</strong>
+                <span id="pipeline-browser" class="badge neutral">Checking</span>
+                <small class="analyst-only">Authenticated extension events</small>
+              </div>
+              <span class="pipeline-arrow" aria-hidden="true">→</span>
+              <div class="pipeline-stage">
+                <span class="pipeline-label">Device</span>
+                <strong>OS Sensors</strong>
+                <span id="pipeline-endpoint" class="badge neutral">Checking</span>
+                <small class="analyst-only">Process · files · clipboard · network</small>
+              </div>
+              <span class="pipeline-arrow" aria-hidden="true">→</span>
+              <div class="pipeline-stage">
+                <span class="pipeline-label">Analysis</span>
+                <strong>Threat Engines</strong>
+                <span id="pipeline-analysis" class="badge neutral">Checking</span>
+                <small class="analyst-only">MITRE · correlation · C2/DGA</small>
+              </div>
+              <span class="pipeline-arrow" aria-hidden="true">→</span>
+              <div class="pipeline-stage">
+                <span class="pipeline-label">Forensics</span>
+                <strong>Evidence</strong>
+                <span id="pipeline-evidence" class="badge neutral">Checking</span>
+                <small class="analyst-only">SHA-256 · Merkle · Ed25519</small>
+              </div>
+              <span class="pipeline-arrow" aria-hidden="true">→</span>
+              <div class="pipeline-stage">
+                <span class="pipeline-label">Interface</span>
+                <strong>Live SOC</strong>
+                <span id="pipeline-live" class="badge neutral">Checking</span>
+                <small class="analyst-only">SSE live updates with polling fallback</small>
+              </div>
+            </div>
+          </article>
+
           <div class="metric-grid">
             <article class="metric">
               <span class="metric-label">Evidence records</span
@@ -121,6 +226,9 @@
                 </div>
               </div>
               <div id="sensor-list" class="sensor-list"></div>
+              <p class="analyst-only analyst-note">
+                Analyst mode shows sensor transport modes and fallback coverage so you can verify what is actually running.
+              </p>
               <p class="fine-print">
                 A detection is a reason to investigate. It does not, on its own,
                 prove that an attack occurred.
@@ -226,7 +334,7 @@
               </div>
               <span class="badge neutral" id="root-match">Not checked</span>
             </div>
-            <div class="hash-grid">
+            <div class="hash-grid analyst-only">
               <div class="hash-card">
                 <span class="eyebrow">ORIGINAL SIGNED BASELINE</span
                 ><code id="original-root">Waiting for verification</code
@@ -311,7 +419,7 @@
               <button class="text-button" data-go="reports">
                 Open daily reports →
               </button>
-              <details>
+              <details class="analyst-only">
                 <summary>Storage and trust details</summary>
                 <dl class="detail-list">
                   <dt>Application data</dt>
