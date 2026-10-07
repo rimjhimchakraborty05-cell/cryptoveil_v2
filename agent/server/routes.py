@@ -566,7 +566,7 @@ def verify_daily_evidence(date: str, request: Request):
 def download_daily_evidence(
     date: str,
     request: Request,
-    format: Literal["zip", "json"] = "zip",
+    format: Literal["zip", "json", "pdf", "events", "metadata"] = "zip",
 ):
     try:
         data, media_type, filename = request.app.state.report_store.download(
