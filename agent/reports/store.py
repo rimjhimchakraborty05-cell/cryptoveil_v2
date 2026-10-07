@@ -87,6 +87,23 @@ class ReportStore:
                 files[f"report.{fmt}"] = export(report, fmt)[0]
             files["evidence.jsonl"] = b"".join(canonical(e) + b"\n" for e in evidence)
             files["checkpoints.json"] = canonical(report["checkpoints"])
+            files["daily_summary.json"] = canonical(
+                {
+                    "schema_version": 1,
+                    "kind": "daily_security_summary",
+                    "date": date,
+                    "timezone": report["timezone"],
+                    "generated_at": report["generated_at"],
+                    "executive_summary": report["executive_summary"],
+                    "browser_security": report["browser_security"],
+                    "endpoint_security": report["endpoint_security"],
+                    "forensic_integrity": {
+                        "verified": report["forensic_integrity"].get("verified"),
+                        "total_events": report["forensic_integrity"].get("total_events"),
+                        "checkpoint_count": report["forensic_integrity"].get("checkpoint_count"),
+                    },
+                }
+            )
 
             previous = self._latest_verified_daily_seal_before(date)
             seal = self.audit.sign(
@@ -197,6 +214,7 @@ class ReportStore:
                 "evidence.jsonl",
                 "checkpoints.json",
                 "daily_seal.json",
+                "daily_summary.json",
             }:
                 issues.append("Unexpected file in manifest")
                 continue
