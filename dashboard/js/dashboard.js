@@ -9,11 +9,13 @@ const state = {
   selected: null,
   polling: false,
   live: false,
+  investigation: null,
   mode: localStorage.getItem("cv_interface_mode") === "analyst" ? "analyst" : "simple",
 };
 const titles = {
   overview: "Command Center",
   activity: "Activity",
+  threats: "Threat Investigation",
   evidence: "Evidence",
   reports: "Daily reports",
 };
@@ -21,6 +23,11 @@ function node(tag, cls, text) {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
   if (text !== undefined) n.textContent = String(text);
+  return n;
+}
+function svgNode(tag, attrs = {}) {
+  const n = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [key, value] of Object.entries(attrs)) n.setAttribute(key, String(value));
   return n;
 }
 function badge(text, cls = "neutral") {
@@ -121,6 +128,7 @@ function applyMode(mode) {
   $("mode-simple").setAttribute("aria-pressed", String(simple));
   $("mode-analyst").classList.toggle("active", !simple);
   $("mode-analyst").setAttribute("aria-pressed", String(!simple));
+  if (state.investigation) renderInvestigation(state.investigation);
 }
 function sensorByName(data, name) {
   return data.sensors.find((sensor) => sensor.name === name);
@@ -216,6 +224,7 @@ function selectView(view) {
   $("breadcrumb").textContent = `Workspace / ${titles[view]}`;
   history.replaceState(null, "", `#${view}`);
   if (view === "activity") loadActivity().catch(showError);
+  if (view === "threats") loadInvestigation().catch(showError);
   if (view === "evidence") loadDailyEvidence().catch(showError);
   if (view === "reports") loadReports().catch(showError);
 }
@@ -653,6 +662,218 @@ function openEvent(event) {
   $("proof-result").textContent = "";
   $("event-dialog").showModal();
 }
+function findingContext(event) {
+  const topic = event.event?.topic || "";
+  if (topic === "engine.mitre.alert")
+    return event.event.mitre_id
+      ? `${event.event.mitre_id} · ${event.event.mitre_name || "MITRE ATT&CK"}`
+      : "MITRE ATT&CK";
+  if (topic === "engine.network.c2") return "Possible C2 beaconing";
+  if (topic === "engine.network.dga") return "DGA heuristic";
+  if (topic === "engine.antiforensic.detected") return "Anti-forensic behavior";
+  if (topic === "engine.correlation.finding")
+    return (event.event.mitre_ids || []).length
+      ? `Correlated · ${event.event.mitre_ids.join(", ")}`
+      : "Correlated observations";
+  if (topic === "sensor.filesystem.entropy") return "Ransomware behavioral indicator";
+  if (topic === "sensor.clipboard.swap") return "Clipboard replacement indicator";
+  if (event.event?.event_kind === "site_warning") return "Website trust warning";
+  return "Security observation";
+}
+
+function processChains(graph) {
+  const nodes = graph.nodes || [];
+  const byPid = new Map(nodes.map((item) => [item.pid, item]));
+  const flagged = nodes.filter((item) => item.flagged);
+  const chains = [];
+
+  for (const target of flagged.slice(0, 8)) {
+    const chain = [target];
+    let current = target;
+    const seen = new Set([target.pid]);
+    for (let depth = 0; depth < 3; depth++) {
+      const parent = byPid.get(current.ppid);
+      if (!parent || seen.has(parent.pid)) break;
+      chain.unshift(parent);
+      seen.add(parent.pid);
+      current = parent;
+    }
+    chains.push(chain);
+  }
+  return chains;
+}
+
+function renderProcessGraph(graph) {
+  const svg = $("process-graph-svg");
+  const empty = $("process-graph-empty");
+  svg.replaceChildren();
+
+  const chains = processChains(graph);
+  const flaggedCount = graph.flagged_processes || 0;
+  setBadge(
+    "process-graph-count",
+    flaggedCount
+      ? `${flaggedCount} active flagged`
+      : `${graph.active_processes || 0} active processes`,
+    flaggedCount ? "warn" : "good",
+  );
+
+  if (!chains.length) {
+    svg.hidden = true;
+    empty.hidden = false;
+    empty.textContent =
+      state.mode === "analyst" && (graph.active_processes || 0)
+        ? `No active MITRE-flagged lineage. ${graph.active_processes} active processes are currently tracked.`
+        : "No active suspicious process relationship is currently flagged.";
+    return;
+  }
+
+  empty.hidden = true;
+  svg.hidden = false;
+
+  const width = 900;
+  const laneHeight = 112;
+  const height = Math.max(170, chains.length * laneHeight + 24);
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+  chains.forEach((chain, lane) => {
+    const y = 30 + lane * laneHeight;
+    const spacing = Math.min(220, 760 / Math.max(1, chain.length - 1));
+    const startX = chain.length === 1 ? 350 : 40;
+
+    chain.forEach((proc, index) => {
+      const x = startX + index * spacing;
+      if (index) {
+        const prevX = startX + (index - 1) * spacing;
+        const line = svgNode("line", {
+          x1: prevX + 145,
+          y1: y + 34,
+          x2: x,
+          y2: y + 34,
+          class: "process-edge",
+        });
+        svg.append(line);
+      }
+
+      const group = svgNode("g", {
+        class: proc.flagged ? "process-node flagged" : "process-node",
+        transform: `translate(${x} ${y})`,
+      });
+      const rect = svgNode("rect", {
+        width: 145,
+        height: 68,
+        rx: 10,
+        ry: 10,
+      });
+      const name = svgNode("text", { x: 12, y: 22, class: "process-node-name" });
+      name.textContent = (proc.name || "process").slice(0, 20);
+      const pid = svgNode("text", { x: 12, y: 40, class: "process-node-meta" });
+      pid.textContent = `PID ${proc.pid}`;
+      const detail = svgNode("text", { x: 12, y: 56, class: "process-node-meta" });
+      detail.textContent = proc.flagged
+        ? `${proc.mitre_id || "Rule"} · ${proc.severity || "review"}`
+        : proc.parent_name
+          ? `Parent: ${proc.parent_name.slice(0, 14)}`
+          : "Observed process";
+      group.append(rect, name, pid, detail);
+
+      if (proc.flagged && proc.alert_event_id) {
+        group.classList.add("interactive");
+        group.setAttribute("tabindex", "0");
+        group.setAttribute(
+          "aria-label",
+          `Open ${proc.name} MITRE alert ${proc.mitre_id || ""}`,
+        );
+        const open = () =>
+          api(`/api/events/id/${encodeURIComponent(proc.alert_event_id)}`)
+            .then(openEvent)
+            .catch(showError);
+        group.addEventListener("click", open);
+        group.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            open();
+          }
+        });
+      }
+      svg.append(group);
+    });
+  });
+}
+
+function renderInvestigation(data) {
+  state.investigation = data;
+  const summary = data.summary || {};
+  $("threat-findings").textContent = number(summary.findings);
+  $("threat-critical").textContent = number(summary.critical);
+  $("threat-mitre").textContent = number(summary.mitre_alerts);
+  $("threat-correlated").textContent = number(summary.correlated_findings);
+
+  const techniqueList = $("mitre-technique-list");
+  techniqueList.replaceChildren();
+  $("mitre-technique-empty").hidden = !!data.mitre_techniques.length;
+  for (const technique of data.mitre_techniques.slice(0, 12)) {
+    const row = node("div", "technique-row");
+    const label = node("div");
+    label.append(
+      node("strong", "", technique.id),
+      node("small", "", technique.name),
+    );
+    row.append(label, badge(`${technique.count} finding${technique.count === 1 ? "" : "s"}`, "neutral"));
+    techniqueList.append(row);
+  }
+
+  renderProcessGraph(data.process_graph || { nodes: [], edges: [] });
+
+  const tbody = $("threat-findings-body");
+  tbody.replaceChildren();
+  $("threat-findings-empty").hidden = !!data.recent_findings.length;
+  for (const finding of data.recent_findings) {
+    const summaryCell = node("td");
+    summaryCell.append(
+      node("strong", "", finding.summary),
+      finding.hostname ? node("small", "", finding.hostname) : node("small", "", ""),
+    );
+
+    const level = node("td");
+    level.append(
+      badge(
+        finding.severity,
+        ["critical", "high"].includes(finding.severity)
+          ? "bad"
+          : finding.severity === "medium"
+            ? "warn"
+            : "neutral",
+      ),
+    );
+
+    const context = node("td");
+    context.append(
+      node("strong", "", findingContext(finding)),
+      node("small", "", finding.next_step),
+    );
+
+    const evidence = node("td");
+    const button = node("button", "text-button", `Open #${finding.seq}`);
+    button.addEventListener("click", () => openEvent(finding));
+    evidence.append(button);
+
+    const row = node("tr");
+    row.append(
+      node("td", "", timeLabel(finding.timestamp)),
+      summaryCell,
+      level,
+      context,
+      evidence,
+    );
+    tbody.append(row);
+  }
+}
+
+async function loadInvestigation() {
+  renderInvestigation(await api("/api/investigation"));
+}
+
 async function loadDailyEvidence() {
   const data = await api("/api/evidence/daily");
   const tbody = $("daily-evidence-body");
@@ -848,6 +1069,7 @@ async function poll() {
   try {
     await refreshStatus();
     if (state.view === "activity") await loadActivity();
+    if (state.view === "threats") await loadInvestigation();
   } catch (e) {
     $("app-status").textContent = "Application unavailable";
     $("app-dot").classList.remove("online");
@@ -945,6 +1167,9 @@ $("verify-button").addEventListener("click", (event) =>
 );
 $("refresh-activity").addEventListener("click", (event) =>
   action(event.currentTarget, loadActivity),
+);
+$("refresh-threats").addEventListener("click", (event) =>
+  action(event.currentTarget, loadInvestigation),
 );
 $("refresh-reports").addEventListener("click", (event) =>
   action(event.currentTarget, loadReports),
