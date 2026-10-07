@@ -587,10 +587,40 @@ function renderActivity() {
     tbody.append(row);
   }
 }
+function explainEvent(event) {
+  const topic = event.event?.topic || "";
+  const kind = event.event?.event_kind || "";
+
+  if (topic === "engine.mitre.alert") {
+    const technique = event.event.mitre_id ? ` (${event.event.mitre_id})` : "";
+    return `The process behavior matched a configured MITRE ATT&CK-aligned rule${technique}. CryptoVeil treats this as an indicator that requires review, not proof of an attack.`;
+  }
+  if (topic === "engine.antiforensic.detected")
+    return "A command matched a pattern associated with deleting or weakening forensic evidence. This is treated as high priority because it can reduce incident visibility.";
+  if (topic === "engine.network.c2")
+    return "Repeated outbound contacts showed timing regularity that can resemble beaconing. Legitimate software can also behave this way, so the process and destination should be reviewed.";
+  if (topic === "engine.network.dga")
+    return "The hostname had unusual lexical characteristics such as entropy, length, digit ratio, or vowel ratio. This is a heuristic screening result, not a malware verdict.";
+  if (topic === "engine.correlation.finding")
+    return "Two or more relevant observations occurred within the configured correlation window. CryptoVeil links them for investigation but does not assume that one event caused the other.";
+  if (topic === "sensor.filesystem.entropy" && event.event?.burst_triggered)
+    return "Several high-entropy file changes occurred close together. CryptoVeil combines entropy with burst behavior because entropy alone can also occur in compressed or encrypted files.";
+  if (topic === "sensor.clipboard.swap")
+    return "The clipboard changed in a way that matched the configured rapid-replacement condition. CryptoVeil records hashes and timing rather than the clipboard text itself.";
+  if (kind === "site_warning")
+    return "The website trust heuristic found one or more local address risk signals, such as an unencrypted page or a hostname resembling a known brand.";
+  if (kind?.startsWith("shadow_ai"))
+    return "A known AI service or AI-related page component was observed. CryptoVeil reports the observation without claiming that data was read or leaked.";
+  if (kind === "sensitive_field_used")
+    return "A field category considered sensitive was used on the page. CryptoVeil records only the category and protection state, not the entered value.";
+  return "CryptoVeil stored this observation because it is part of the monitored browser or endpoint activity. No additional threat conclusion is implied unless an analysis rule also matched.";
+}
+
 function openEvent(event) {
   state.selected = event;
   $("event-title").textContent = `Evidence #${event.seq}`;
   $("event-summary").textContent = event.summary;
+  $("event-reason").textContent = explainEvent(event);
   $("event-action").textContent = event.next_step;
   $("event-time").textContent = timeLabel(event.timestamp, true);
   $("event-hash").textContent = event.hash || "Unavailable";
