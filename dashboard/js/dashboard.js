@@ -846,11 +846,13 @@ function connectLive() {
   liveConnection.onopen = () => {
     state.live = true;
     $("app-status").textContent = "Live updates connected";
+    setBadge("pipeline-live", "Live", "good");
   };
   liveConnection.onerror = () => {
     state.live = false;
     $("app-status").textContent =
       "Reconnecting live updates · periodic refresh active";
+    setBadge("pipeline-live", "Polling", "neutral");
   };
   liveConnection.addEventListener("change", () => {
     if (liveRefresh) return;
