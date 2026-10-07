@@ -9,9 +9,10 @@ const state = {
   selected: null,
   polling: false,
   live: false,
+  mode: localStorage.getItem("cv_interface_mode") === "analyst" ? "analyst" : "simple",
 };
 const titles = {
-  overview: "Overview",
+  overview: "Command Center",
   activity: "Activity",
   evidence: "Evidence",
   reports: "Daily reports",
@@ -110,6 +111,96 @@ function setBanner(id, cls, title, message) {
 function setBadge(id, text, cls) {
   $(id).className = `badge ${cls}`;
   $(id).textContent = text;
+}
+function applyMode(mode) {
+  state.mode = mode === "analyst" ? "analyst" : "simple";
+  localStorage.setItem("cv_interface_mode", state.mode);
+  document.body.dataset.mode = state.mode;
+  const simple = state.mode === "simple";
+  $("mode-simple").classList.toggle("active", simple);
+  $("mode-simple").setAttribute("aria-pressed", String(simple));
+  $("mode-analyst").classList.toggle("active", !simple);
+  $("mode-analyst").setAttribute("aria-pressed", String(!simple));
+}
+function sensorByName(data, name) {
+  return data.sensors.find((sensor) => sensor.name === name);
+}
+function sensorPresentation(sensor, activeText = "Active") {
+  if (!sensor) return { text: "Unavailable", tone: "neutral" };
+  if (sensor.status === "active") return { text: activeText, tone: "good" };
+  if (sensor.status === "starting") return { text: "Starting", tone: "neutral" };
+  if (sensor.status === "degraded") return { text: "Limited", tone: "warn" };
+  return { text: "Unavailable", tone: "bad" };
+}
+function renderProtectionStatus(data, connected, integrity) {
+  const process = sensorByName(data, "ProcessWatcher");
+  const network = sensorByName(data, "NetworkEngine");
+  const entropy = sensorByName(data, "EntropyWatcher");
+  const clipboard = sensorByName(data, "ClipboardWatcher");
+  const deviceSensors = [process, network, entropy, clipboard].filter(Boolean);
+  const activeDeviceSensors = deviceSensors.filter((sensor) => sensor.status === "active");
+
+  setBadge(
+    "protect-browser",
+    connected.length ? "Active" : "Not connected",
+    connected.length ? "good" : "neutral",
+  );
+
+  const endpointText =
+    !data.sensors_enabled
+      ? "Disabled"
+      : deviceSensors.length && activeDeviceSensors.length === deviceSensors.length
+        ? "Active"
+        : activeDeviceSensors.length
+          ? "Limited"
+          : "Unavailable";
+  const endpointTone =
+    endpointText === "Active" ? "good" : endpointText === "Limited" ? "warn" : "neutral";
+  setBadge("protect-endpoint", endpointText, endpointTone);
+
+  const ransomware = sensorPresentation(entropy, "Monitoring");
+  setBadge("protect-ransomware", ransomware.text, ransomware.tone);
+
+  const clip = sensorPresentation(clipboard, "Monitoring");
+  setBadge("protect-clipboard", clip.text, clip.tone);
+
+  setBadge(
+    "protect-shadow",
+    connected.length ? "Monitoring" : "Not connected",
+    connected.length ? "good" : "neutral",
+  );
+
+  setBadge(
+    "protect-evidence",
+    integrity.verified && !data.collection_paused ? "Verified" : "Review",
+    integrity.verified && !data.collection_paused ? "good" : "bad",
+  );
+
+  setBadge(
+    "pipeline-browser",
+    connected.length ? "Live" : "Waiting",
+    connected.length ? "good" : "neutral",
+  );
+  setBadge(
+    "pipeline-endpoint",
+    endpointText === "Active" ? "Live" : endpointText,
+    endpointTone,
+  );
+  setBadge(
+    "pipeline-analysis",
+    data.collection_paused ? "Paused" : "Ready",
+    data.collection_paused ? "bad" : "good",
+  );
+  setBadge(
+    "pipeline-evidence",
+    integrity.verified && !data.collection_paused ? "Verified" : "Review",
+    integrity.verified && !data.collection_paused ? "good" : "bad",
+  );
+  setBadge(
+    "pipeline-live",
+    state.live ? "Live" : "Polling",
+    state.live ? "good" : "neutral",
+  );
 }
 function selectView(view) {
   if (!titles[view]) view = "overview";
@@ -228,6 +319,7 @@ function renderStatus(data) {
   $("app-dot").classList.add("online");
   const integrity = data.integrity;
   const connected = data.clients.filter((c) => c.connected);
+  renderProtectionStatus(data, connected, integrity);
   $("metric-evidence").textContent = number(
     Math.max(data.total_events, integrity.expected_events || 0),
   );
@@ -381,7 +473,7 @@ function renderStatus(data) {
   for (const item of rows) {
     const row = node("div", "sensor-row"),
       label = node("div", "", item.name);
-    if (item.detail) label.append(node("small", "", item.detail));
+    if (item.detail) label.append(node("small", "analyst-only", item.detail));
     row.append(
       label,
       badge(
@@ -871,8 +963,12 @@ $("demo-button").addEventListener("click", (event) =>
     );
   }),
 );
+$("mode-simple").addEventListener("click", () => applyMode("simple"));
+$("mode-analyst").addEventListener("click", () => applyMode("analyst"));
+
 (async () => {
   try {
+    applyMode(state.mode);
     await bootstrap();
     selectView(location.hash.slice(1) || "overview");
     await poll();
