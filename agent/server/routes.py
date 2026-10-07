@@ -394,6 +394,73 @@ def process_graph(request: Request):
     return request.app.state.mitre_engine.graph()
 
 
+@router.get("/api/investigation")
+def investigation(request: Request):
+    state = request.app.state
+    entries = state.audit_logger.recent_entries(500)
+
+    def is_investigation_event(entry: dict) -> bool:
+        event = entry.get("event", {})
+        topic = event.get("topic", "")
+        kind = event.get("event_kind", "")
+        return (
+            topic
+            in {
+                "engine.mitre.alert",
+                "engine.network.c2",
+                "engine.network.dga",
+                "engine.antiforensic.detected",
+                "engine.correlation.finding",
+                "sensor.clipboard.swap",
+            }
+            or (topic == "sensor.filesystem.entropy" and bool(event.get("burst_triggered")))
+            or (topic == "browser.telemetry" and kind == "site_warning")
+        )
+
+    selected = [entry for entry in entries if is_investigation_event(entry)]
+    recent = [event_view(entry) for entry in reversed(selected[-100:])]
+
+    techniques: dict[tuple[str, str], int] = {}
+    for entry in selected:
+        event = entry.get("event", {})
+        if event.get("topic") == "engine.mitre.alert":
+            key = (event.get("mitre_id", "Unknown"), event.get("mitre_name", "Unknown"))
+            techniques[key] = techniques.get(key, 0) + 1
+        for mitre_id in event.get("mitre_ids", []) or []:
+            key = (mitre_id, "Correlated finding")
+            techniques[key] = techniques.get(key, 0) + 1
+
+    severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    for entry in selected:
+        severity = entry.get("event", {}).get("severity", "info")
+        severity_counts[severity if severity in severity_counts else "info"] += 1
+
+    return {
+        "window": "Latest 500 stored events",
+        "summary": {
+            "findings": len(selected),
+            "critical": severity_counts["critical"],
+            "high": severity_counts["high"],
+            "mitre_alerts": sum(
+                entry.get("event", {}).get("topic") == "engine.mitre.alert"
+                for entry in selected
+            ),
+            "correlated_findings": sum(
+                entry.get("event", {}).get("topic") == "engine.correlation.finding"
+                for entry in selected
+            ),
+        },
+        "mitre_techniques": [
+            {"id": key[0], "name": key[1], "count": count}
+            for key, count in sorted(
+                techniques.items(), key=lambda item: (-item[1], item[0][0])
+            )
+        ],
+        "recent_findings": recent,
+        "process_graph": state.mitre_engine.graph(),
+    }
+
+
 @router.get("/api/evidence/daily")
 def daily_evidence(request: Request):
     audit = request.app.state.audit_logger
