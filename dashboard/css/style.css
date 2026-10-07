@@ -1074,7 +1074,14 @@ pre {
   padding: 0 5px;
 }
 .daily-evidence-panel td:last-child {
-  white-space: nowrap;
+  white-space: normal;
+  min-width: 260px;
+}
+.evidence-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 
