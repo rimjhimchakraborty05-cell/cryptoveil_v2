@@ -96,30 +96,66 @@ class MitreEngine:
             "name": event.name,
             "exe": event.exe,
             "ppid": event.ppid,
+            "parent_name": event.parent_name,
             "flagged": False,
             "rule_id": None,
+            "mitre_id": None,
+            "mitre_name": None,
+            "severity": None,
+            "alert_event_id": None,
         }
         if event.ppid:
             self._graph_edges.append({"from": event.ppid, "to": event.pid})
 
         for rule in self._rules:
             if self._matches(rule["conditions"], event):
-                self._graph_nodes[event.pid]["flagged"] = True
-                self._graph_nodes[event.pid]["rule_id"] = rule["id"]
-                await self._broker.publish(
-                    MitreAlertEvent(
-                        severity=SEVERITY_MAP.get(rule.get("severity", "high"), EventSeverity.HIGH),
-                        mitre_id=rule["mitre_id"],
-                        mitre_name=rule["mitre_name"],
-                        description=rule["description"],
-                        pid=event.pid,
-                        process_name=event.name,
-                        parent_name=event.parent_name,
-                        cmdline=event.cmdline,
-                        rule_id=rule["id"],
-                    )
+                severity = SEVERITY_MAP.get(
+                    rule.get("severity", "high"), EventSeverity.HIGH
                 )
-                log.warning("MITRE match %s (%s) pid=%s", rule["id"], rule["mitre_id"], event.pid)
+                alert = MitreAlertEvent(
+                    severity=severity,
+                    mitre_id=rule["mitre_id"],
+                    mitre_name=rule["mitre_name"],
+                    description=rule["description"],
+                    pid=event.pid,
+                    process_name=event.name,
+                    parent_name=event.parent_name,
+                    cmdline=event.cmdline,
+                    rule_id=rule["id"],
+                )
+                node = self._graph_nodes[event.pid]
+                node.update(
+                    {
+                        "flagged": True,
+                        "rule_id": rule["id"],
+                        "mitre_id": rule["mitre_id"],
+                        "mitre_name": rule["mitre_name"],
+                        "severity": severity.value,
+                        "alert_event_id": alert.event_id,
+                    }
+                )
+                try:
+                    await self._broker.publish(alert)
+                except Exception:
+                    # A graph marker must never claim a stored detection when
+                    # durable publication failed.
+                    node.update(
+                        {
+                            "flagged": False,
+                            "rule_id": None,
+                            "mitre_id": None,
+                            "mitre_name": None,
+                            "severity": None,
+                            "alert_event_id": None,
+                        }
+                    )
+                    raise
+                log.warning(
+                    "MITRE match %s (%s) pid=%s",
+                    rule["id"],
+                    rule["mitre_id"],
+                    event.pid,
+                )
                 break  # first matching rule wins; avoids duplicate alerts per spawn
 
     async def _on_terminate(self, event: ProcessTerminatedEvent) -> None:
@@ -163,4 +199,10 @@ class MitreEngine:
         )
 
     def graph(self) -> dict:
-        return {"nodes": list(self._graph_nodes.values()), "edges": self._graph_edges}
+        nodes = list(self._graph_nodes.values())
+        return {
+            "nodes": nodes,
+            "edges": self._graph_edges,
+            "active_processes": len(nodes),
+            "flagged_processes": sum(bool(node.get("flagged")) for node in nodes),
+        }
