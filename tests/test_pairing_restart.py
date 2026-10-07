@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from agent.server.security import PairingManager
 
 
