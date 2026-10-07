@@ -1228,3 +1228,33 @@ body[data-mode="simple"] .analyst-only {
     grid-template-columns: 32px 1fr auto;
   }
 }
+
+
+/* Plain-language event explanation */
+.event-explanation-grid {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 16px;
+}
+.event-explanation {
+  padding: 14px 15px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fbfafc;
+}
+.event-explanation p {
+  margin: 6px 0 0;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.related-evidence {
+  margin: 8px 0 14px;
+  padding: 12px 14px;
+  border: 1px solid #ded5e7;
+  border-radius: 9px;
+  background: #f4eff8;
+}
+.related-evidence .text-button {
+  margin-right: 12px;
+}
