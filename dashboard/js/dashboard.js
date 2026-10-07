@@ -9,17 +9,26 @@ const state = {
   selected: null,
   polling: false,
   live: false,
+  investigation: null,
+  mode: localStorage.getItem("cv_interface_mode") === "analyst" ? "analyst" : "simple",
 };
 const titles = {
-  overview: "Overview",
+  overview: "Command Center",
   activity: "Activity",
+  threats: "Threat Investigation",
   evidence: "Evidence",
   reports: "Daily reports",
+  lab: "Simulation Lab",
 };
 function node(tag, cls, text) {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
   if (text !== undefined) n.textContent = String(text);
+  return n;
+}
+function svgNode(tag, attrs = {}) {
+  const n = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [key, value] of Object.entries(attrs)) n.setAttribute(key, String(value));
   return n;
 }
 function badge(text, cls = "neutral") {
@@ -111,6 +120,165 @@ function setBadge(id, text, cls) {
   $(id).className = `badge ${cls}`;
   $(id).textContent = text;
 }
+function applyMode(mode) {
+  state.mode = mode === "analyst" ? "analyst" : "simple";
+  localStorage.setItem("cv_interface_mode", state.mode);
+  document.body.dataset.mode = state.mode;
+  const simple = state.mode === "simple";
+  $("mode-simple").classList.toggle("active", simple);
+  $("mode-simple").setAttribute("aria-pressed", String(simple));
+  $("mode-analyst").classList.toggle("active", !simple);
+  $("mode-analyst").setAttribute("aria-pressed", String(!simple));
+  if (state.investigation) renderInvestigation(state.investigation);
+  if (!simple && state.csrf && state.view === "overview")
+    loadRuntimeReadiness().catch(showError);
+}
+function sensorByName(data, name) {
+  return data.sensors.find((sensor) => sensor.name === name);
+}
+function sensorPresentation(sensor, activeText = "Active") {
+  if (!sensor) return { text: "Unavailable", tone: "neutral" };
+  if (sensor.status === "active") return { text: activeText, tone: "good" };
+  if (sensor.status === "starting") return { text: "Starting", tone: "neutral" };
+  if (sensor.status === "degraded") return { text: "Limited", tone: "warn" };
+  return { text: "Unavailable", tone: "bad" };
+}
+function setSetupStep(iconId, textId, complete, message) {
+  const icon = $(iconId);
+  icon.classList.toggle("complete", complete);
+  icon.textContent = complete ? "✓" : icon.dataset.step || icon.textContent;
+  $(textId).textContent = message;
+}
+function renderFirstRun(data, connected, integrity) {
+  const process = sensorByName(data, "ProcessWatcher");
+  const network = sensorByName(data, "NetworkEngine");
+  const entropy = sensorByName(data, "EntropyWatcher");
+  const clipboard = sensorByName(data, "ClipboardWatcher");
+  const monitored = [process, network, entropy, clipboard].filter(Boolean);
+  const acceptable = monitored.filter((sensor) =>
+    ["active", "degraded"].includes(sensor.status),
+  );
+
+  const appReady = integrity.verified && !data.collection_paused;
+  const browserReady = connected.length > 0;
+  const monitoringReady =
+    data.sensors_enabled &&
+    monitored.length > 0 &&
+    acceptable.length === monitored.length &&
+    integrity.verified;
+
+  setSetupStep(
+    "setup-app-icon",
+    "setup-app-text",
+    appReady,
+    appReady
+      ? "Local protection services and evidence verification are ready."
+      : data.collection_paused
+        ? "Evidence collection is paused. Review the integrity warning first."
+        : "Waiting for the evidence baseline to verify.",
+  );
+  setSetupStep(
+    "setup-browser-icon",
+    "setup-browser-text",
+    browserReady,
+    browserReady
+      ? `${connected.length} browser${connected.length === 1 ? "" : "s"} connected and sending authenticated status.`
+      : data.clients.length
+        ? "A browser is paired but currently offline. Open it and check the extension."
+        : "Pair the CryptoVeil extension once using the one-use code.",
+  );
+  setSetupStep(
+    "setup-monitoring-icon",
+    "setup-monitoring-text",
+    monitoringReady,
+    monitoringReady
+      ? "Endpoint monitoring and evidence integrity are ready."
+      : !data.sensors_enabled
+        ? "Endpoint sensors are disabled in this application session."
+        : "Waiting for endpoint monitoring to become ready.",
+  );
+
+  const completeCount = [appReady, browserReady, monitoringReady].filter(Boolean).length;
+  setBadge(
+    "first-run-progress",
+    completeCount === 3 ? "Setup complete" : `${completeCount} of 3 ready`,
+    completeCount === 3 ? "good" : completeCount ? "warn" : "neutral",
+  );
+  $("first-run-card").hidden = completeCount === 3;
+  $("setup-connect-browser").hidden = browserReady;
+  $("setup-open-lab").hidden = !appReady || monitoringReady;
+}
+
+function renderProtectionStatus(data, connected, integrity) {
+  const process = sensorByName(data, "ProcessWatcher");
+  const network = sensorByName(data, "NetworkEngine");
+  const entropy = sensorByName(data, "EntropyWatcher");
+  const clipboard = sensorByName(data, "ClipboardWatcher");
+  const deviceSensors = [process, network, entropy, clipboard].filter(Boolean);
+  const activeDeviceSensors = deviceSensors.filter((sensor) => sensor.status === "active");
+
+  setBadge(
+    "protect-browser",
+    connected.length ? "Active" : "Not connected",
+    connected.length ? "good" : "neutral",
+  );
+
+  const endpointText =
+    !data.sensors_enabled
+      ? "Disabled"
+      : deviceSensors.length && activeDeviceSensors.length === deviceSensors.length
+        ? "Active"
+        : activeDeviceSensors.length
+          ? "Limited"
+          : "Unavailable";
+  const endpointTone =
+    endpointText === "Active" ? "good" : endpointText === "Limited" ? "warn" : "neutral";
+  setBadge("protect-endpoint", endpointText, endpointTone);
+
+  const ransomware = sensorPresentation(entropy, "Monitoring");
+  setBadge("protect-ransomware", ransomware.text, ransomware.tone);
+
+  const clip = sensorPresentation(clipboard, "Monitoring");
+  setBadge("protect-clipboard", clip.text, clip.tone);
+
+  setBadge(
+    "protect-shadow",
+    connected.length ? "Monitoring" : "Not connected",
+    connected.length ? "good" : "neutral",
+  );
+
+  setBadge(
+    "protect-evidence",
+    integrity.verified && !data.collection_paused ? "Verified" : "Review",
+    integrity.verified && !data.collection_paused ? "good" : "bad",
+  );
+
+  setBadge(
+    "pipeline-browser",
+    connected.length ? "Live" : "Waiting",
+    connected.length ? "good" : "neutral",
+  );
+  setBadge(
+    "pipeline-endpoint",
+    endpointText === "Active" ? "Live" : endpointText,
+    endpointTone,
+  );
+  setBadge(
+    "pipeline-analysis",
+    data.collection_paused ? "Paused" : "Ready",
+    data.collection_paused ? "bad" : "good",
+  );
+  setBadge(
+    "pipeline-evidence",
+    integrity.verified && !data.collection_paused ? "Verified" : "Review",
+    integrity.verified && !data.collection_paused ? "good" : "bad",
+  );
+  setBadge(
+    "pipeline-live",
+    state.live ? "Live" : "Polling",
+    state.live ? "good" : "neutral",
+  );
+}
 function selectView(view) {
   if (!titles[view]) view = "overview";
   state.view = view;
@@ -124,7 +292,11 @@ function selectView(view) {
   });
   $("breadcrumb").textContent = `Workspace / ${titles[view]}`;
   history.replaceState(null, "", `#${view}`);
+  if (view === "overview" && state.mode === "analyst")
+    loadRuntimeReadiness().catch(showError);
   if (view === "activity") loadActivity().catch(showError);
+  if (view === "threats") loadInvestigation().catch(showError);
+  if (view === "evidence") loadDailyEvidence().catch(showError);
   if (view === "reports") loadReports().catch(showError);
 }
 function renderIntegrity(result) {
@@ -227,6 +399,8 @@ function renderStatus(data) {
   $("app-dot").classList.add("online");
   const integrity = data.integrity;
   const connected = data.clients.filter((c) => c.connected);
+  renderProtectionStatus(data, connected, integrity);
+  renderFirstRun(data, connected, integrity);
   $("metric-evidence").textContent = number(
     Math.max(data.total_events, integrity.expected_events || 0),
   );
@@ -380,7 +554,7 @@ function renderStatus(data) {
   for (const item of rows) {
     const row = node("div", "sensor-row"),
       label = node("div", "", item.name);
-    if (item.detail) label.append(node("small", "", item.detail));
+    if (item.detail) label.append(node("small", "analyst-only", item.detail));
     row.append(
       label,
       badge(
@@ -443,6 +617,38 @@ function renderClients(clients) {
 async function refreshStatus() {
   renderStatus(await api("/api/status"));
 }
+function renderRuntimeReadiness(data) {
+  const labels = {
+    data_directory: "Persistent data directory",
+    archive_directory: "Evidence archive directory",
+    rules_file: "MITRE rule file",
+    dashboard_assets: "Dashboard assets",
+    extension_assets: "Browser extension assets",
+    evidence_integrity: "Evidence integrity",
+  };
+  const target = $("runtime-checks");
+  target.replaceChildren();
+
+  for (const [key, passed] of Object.entries(data.checks || {})) {
+    const row = node("div", "runtime-check");
+    row.append(
+      node("span", "", labels[key] || key.replaceAll("_", " ")),
+      badge(passed ? "Ready" : "Needs attention", passed ? "good" : "bad"),
+    );
+    target.append(row);
+  }
+
+  const sensorSummary = (data.sensors || [])
+    .map((sensor) => `${sensor.name}: ${sensor.status}`)
+    .join(" · ");
+  $("runtime-path-note").textContent =
+    `${data.packaged ? "Packaged Windows runtime" : "Development runtime"} · loopback-only service · data: ${data.paths?.data || "unknown"}${sensorSummary ? ` · ${sensorSummary}` : ""}`;
+}
+
+async function loadRuntimeReadiness() {
+  renderRuntimeReadiness(await api("/api/runtime/readiness"));
+}
+
 async function loadActivity() {
   const data = await api("/api/events?limit=500");
   state.events = data.events;
@@ -494,10 +700,40 @@ function renderActivity() {
     tbody.append(row);
   }
 }
+function explainEvent(event) {
+  const topic = event.event?.topic || "";
+  const kind = event.event?.event_kind || "";
+
+  if (topic === "engine.mitre.alert") {
+    const technique = event.event.mitre_id ? ` (${event.event.mitre_id})` : "";
+    return `The process behavior matched a configured MITRE ATT&CK-aligned rule${technique}. CryptoVeil treats this as an indicator that requires review, not proof of an attack.`;
+  }
+  if (topic === "engine.antiforensic.detected")
+    return "A command matched a pattern associated with deleting or weakening forensic evidence. This is treated as high priority because it can reduce incident visibility.";
+  if (topic === "engine.network.c2")
+    return "Repeated outbound contacts showed timing regularity that can resemble beaconing. Legitimate software can also behave this way, so the process and destination should be reviewed.";
+  if (topic === "engine.network.dga")
+    return "The hostname had unusual lexical characteristics such as entropy, length, digit ratio, or vowel ratio. This is a heuristic screening result, not a malware verdict.";
+  if (topic === "engine.correlation.finding")
+    return "Two or more relevant observations occurred within the configured correlation window. CryptoVeil links them for investigation but does not assume that one event caused the other.";
+  if (topic === "sensor.filesystem.entropy" && event.event?.burst_triggered)
+    return "Several high-entropy file changes occurred close together. CryptoVeil combines entropy with burst behavior because entropy alone can also occur in compressed or encrypted files.";
+  if (topic === "sensor.clipboard.swap")
+    return "The clipboard changed in a way that matched the configured rapid-replacement condition. CryptoVeil records hashes and timing rather than the clipboard text itself.";
+  if (kind === "site_warning")
+    return "The website trust heuristic found one or more local address risk signals, such as an unencrypted page or a hostname resembling a known brand.";
+  if (kind?.startsWith("shadow_ai"))
+    return "A known AI service or AI-related page component was observed. CryptoVeil reports the observation without claiming that data was read or leaked.";
+  if (kind === "sensitive_field_used")
+    return "A field category considered sensitive was used on the page. CryptoVeil records only the category and protection state, not the entered value.";
+  return "CryptoVeil stored this observation because it is part of the monitored browser or endpoint activity. No additional threat conclusion is implied unless an analysis rule also matched.";
+}
+
 function openEvent(event) {
   state.selected = event;
   $("event-title").textContent = `Evidence #${event.seq}`;
   $("event-summary").textContent = event.summary;
+  $("event-reason").textContent = explainEvent(event);
   $("event-action").textContent = event.next_step;
   $("event-time").textContent = timeLabel(event.timestamp, true);
   $("event-hash").textContent = event.hash || "Unavailable";
@@ -530,6 +766,480 @@ function openEvent(event) {
   $("proof-result").textContent = "";
   $("event-dialog").showModal();
 }
+function findingContext(event) {
+  const topic = event.event?.topic || "";
+  if (topic === "engine.mitre.alert")
+    return event.event.mitre_id
+      ? `${event.event.mitre_id} · ${event.event.mitre_name || "MITRE ATT&CK"}`
+      : "MITRE ATT&CK";
+  if (topic === "engine.network.c2") return "Possible C2 beaconing";
+  if (topic === "engine.network.dga") return "DGA heuristic";
+  if (topic === "engine.antiforensic.detected") return "Anti-forensic behavior";
+  if (topic === "engine.correlation.finding")
+    return (event.event.mitre_ids || []).length
+      ? `Correlated · ${event.event.mitre_ids.join(", ")}`
+      : "Correlated observations";
+  if (topic === "sensor.filesystem.entropy") return "Ransomware behavioral indicator";
+  if (topic === "sensor.clipboard.swap") return "Clipboard replacement indicator";
+  if (event.event?.event_kind === "site_warning") return "Website trust warning";
+  return "Security observation";
+}
+
+function processChains(graph) {
+  const nodes = graph.nodes || [];
+  const byPid = new Map(nodes.map((item) => [item.pid, item]));
+  const flagged = nodes.filter((item) => item.flagged);
+  const chains = [];
+
+  for (const target of flagged.slice(0, 8)) {
+    const chain = [target];
+    let current = target;
+    const seen = new Set([target.pid]);
+    for (let depth = 0; depth < 3; depth++) {
+      const parent = byPid.get(current.ppid);
+      if (!parent || seen.has(parent.pid)) break;
+      chain.unshift(parent);
+      seen.add(parent.pid);
+      current = parent;
+    }
+    chains.push(chain);
+  }
+  return chains;
+}
+
+function renderProcessGraph(graph) {
+  const svg = $("process-graph-svg");
+  const empty = $("process-graph-empty");
+  svg.replaceChildren();
+
+  const chains = processChains(graph);
+  const flaggedCount = graph.flagged_processes || 0;
+  setBadge(
+    "process-graph-count",
+    flaggedCount
+      ? `${flaggedCount} active flagged`
+      : `${graph.active_processes || 0} active processes`,
+    flaggedCount ? "warn" : "good",
+  );
+
+  if (!chains.length) {
+    svg.hidden = true;
+    empty.hidden = false;
+    empty.textContent =
+      state.mode === "analyst" && (graph.active_processes || 0)
+        ? `No active MITRE-flagged lineage. ${graph.active_processes} active processes are currently tracked.`
+        : "No active suspicious process relationship is currently flagged.";
+    return;
+  }
+
+  empty.hidden = true;
+  svg.hidden = false;
+
+  const width = 900;
+  const laneHeight = 112;
+  const height = Math.max(170, chains.length * laneHeight + 24);
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+  chains.forEach((chain, lane) => {
+    const y = 30 + lane * laneHeight;
+    const spacing = Math.min(220, 760 / Math.max(1, chain.length - 1));
+    const startX = chain.length === 1 ? 350 : 40;
+
+    chain.forEach((proc, index) => {
+      const x = startX + index * spacing;
+      if (index) {
+        const prevX = startX + (index - 1) * spacing;
+        const line = svgNode("line", {
+          x1: prevX + 145,
+          y1: y + 34,
+          x2: x,
+          y2: y + 34,
+          class: "process-edge",
+        });
+        svg.append(line);
+      }
+
+      const group = svgNode("g", {
+        class: proc.flagged ? "process-node flagged" : "process-node",
+        transform: `translate(${x} ${y})`,
+      });
+      const rect = svgNode("rect", {
+        width: 145,
+        height: 68,
+        rx: 10,
+        ry: 10,
+      });
+      const name = svgNode("text", { x: 12, y: 22, class: "process-node-name" });
+      name.textContent = (proc.name || "process").slice(0, 20);
+      const pid = svgNode("text", { x: 12, y: 40, class: "process-node-meta" });
+      pid.textContent = `PID ${proc.pid}`;
+      const detail = svgNode("text", { x: 12, y: 56, class: "process-node-meta" });
+      detail.textContent = proc.flagged
+        ? `${proc.mitre_id || "Rule"} · ${proc.severity || "review"}`
+        : proc.parent_name
+          ? `Parent: ${proc.parent_name.slice(0, 14)}`
+          : "Observed process";
+      group.append(rect, name, pid, detail);
+
+      if (proc.flagged && proc.alert_event_id) {
+        group.classList.add("interactive");
+        group.setAttribute("tabindex", "0");
+        group.setAttribute(
+          "aria-label",
+          `Open ${proc.name} MITRE alert ${proc.mitre_id || ""}`,
+        );
+        const open = () =>
+          api(`/api/events/id/${encodeURIComponent(proc.alert_event_id)}`)
+            .then(openEvent)
+            .catch(showError);
+        group.addEventListener("click", open);
+        group.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            open();
+          }
+        });
+      }
+      svg.append(group);
+    });
+  });
+}
+
+function renderInvestigation(data) {
+  state.investigation = data;
+  const summary = data.summary || {};
+  $("threat-findings").textContent = number(summary.findings);
+  $("threat-critical").textContent = number(summary.critical);
+  $("threat-mitre").textContent = number(summary.mitre_alerts);
+  $("threat-correlated").textContent = number(summary.correlated_findings);
+
+  const techniqueList = $("mitre-technique-list");
+  techniqueList.replaceChildren();
+  $("mitre-technique-empty").hidden = !!data.mitre_techniques.length;
+  for (const technique of data.mitre_techniques.slice(0, 12)) {
+    const row = node("div", "technique-row");
+    const label = node("div");
+    label.append(
+      node("strong", "", technique.id),
+      node("small", "", technique.name),
+    );
+    row.append(label, badge(`${technique.count} finding${technique.count === 1 ? "" : "s"}`, "neutral"));
+    techniqueList.append(row);
+  }
+
+  renderProcessGraph(data.process_graph || { nodes: [], edges: [] });
+
+  const tbody = $("threat-findings-body");
+  tbody.replaceChildren();
+  $("threat-findings-empty").hidden = !!data.recent_findings.length;
+  for (const finding of data.recent_findings) {
+    const summaryCell = node("td");
+    summaryCell.append(
+      node("strong", "", finding.summary),
+      finding.hostname ? node("small", "", finding.hostname) : node("small", "", ""),
+    );
+
+    const level = node("td");
+    level.append(
+      badge(
+        finding.severity,
+        ["critical", "high"].includes(finding.severity)
+          ? "bad"
+          : finding.severity === "medium"
+            ? "warn"
+            : "neutral",
+      ),
+    );
+
+    const context = node("td");
+    context.append(
+      node("strong", "", findingContext(finding)),
+      node("small", "", finding.next_step),
+    );
+
+    const evidence = node("td");
+    const button = node("button", "text-button", `Open #${finding.seq}`);
+    button.addEventListener("click", () => openEvent(finding));
+    evidence.append(button);
+
+    const row = node("tr");
+    row.append(
+      node("td", "", timeLabel(finding.timestamp)),
+      summaryCell,
+      level,
+      context,
+      evidence,
+    );
+    tbody.append(row);
+  }
+}
+
+async function loadInvestigation() {
+  renderInvestigation(await api("/api/investigation"));
+}
+
+function appendSensorTestResult(result) {
+  const tbody = $("lab-results-body");
+  $("lab-results-empty").hidden = true;
+
+  const row = node("tr");
+  const name = node("td");
+  name.append(
+    node("strong", "", result.name),
+    node("small", "", result.detail),
+  );
+
+  const evidence = node("td");
+  if (result.evidence_id) {
+    const button = node(
+      "button",
+      "text-button",
+      result.seq === null || result.seq === undefined
+        ? "Open evidence"
+        : `Open #${result.seq}`,
+    );
+    button.addEventListener("click", () =>
+      action(button, async () =>
+        openEvent(
+          await api(
+            `/api/events/id/${encodeURIComponent(result.evidence_id)}`,
+          ),
+        ),
+      ),
+    );
+    evidence.append(button);
+  } else {
+    evidence.textContent = "Not stored";
+  }
+
+  const status = node("td");
+  status.append(
+    badge(result.passed ? "PASS" : "FAIL", result.passed ? "good" : "bad"),
+  );
+
+  row.append(
+    name,
+    node("td", "", "Real sensor"),
+    node("td", "", result.expected_detection),
+    node("td", "", result.actual_detection),
+    node(
+      "td",
+      "",
+      Number.isFinite(result.latency_ms)
+        ? `${result.latency_ms.toLocaleString()} ms`
+        : "—",
+    ),
+    evidence,
+    status,
+  );
+  tbody.prepend(row);
+}
+
+async function runSensorTest(button, testId) {
+  await action(button, async () => {
+    button.dataset.originalLabel ||= button.textContent;
+    button.textContent = "Running real sensor test…";
+    const result = await api(
+      `/api/sensor-tests/${encodeURIComponent(testId)}`,
+      {},
+    );
+    appendSensorTestResult(result);
+    toast(
+      result.passed
+        ? `${result.name} passed using stored real sensor evidence.`
+        : `${result.name} did not produce the expected evidence.`,
+    );
+  });
+  button.textContent = button.dataset.originalLabel || button.textContent;
+}
+
+function renderIntegritySimulation(data) {
+  const panel = $("demo-simulation-panel");
+  const target = $("lab-demo-results");
+  panel.hidden = false;
+  target.replaceChildren();
+
+  const intro = node("p", "fine-print");
+  intro.textContent =
+    data.description ||
+    "This demonstration uses temporary sample evidence and does not alter live evidence.";
+  target.append(intro);
+
+  for (const check of data.result?.checks || []) {
+    const row = node("div", "demo-row");
+    row.append(
+      node("span", "", check.scenario),
+      badge(
+        check.verified ? "Verification passed" : "Change detected",
+        check.verified ? "good" : "warn",
+      ),
+    );
+    target.append(row);
+  }
+}
+
+async function runIntegritySimulation(button) {
+  await action(button, async () => {
+    const data = await api("/api/simulations/integrity", {});
+    renderIntegritySimulation(data);
+    toast("Isolated evidence demonstration finished.");
+  });
+}
+
+async function loadDailyEvidence() {
+  const data = await api("/api/evidence/daily");
+  const tbody = $("daily-evidence-body");
+  tbody.replaceChildren();
+  $("daily-evidence-empty").hidden = !!data.days.length;
+
+  const archive = data.archive || {};
+  $("archive-trust-note").textContent = archive.host_separation_verified
+    ? "Archive separation verified by the configured evidence backend."
+    : archive.note ||
+      "This archive is currently a filesystem reference copy. Use independently managed storage for protection against full host compromise.";
+
+  for (const day of data.days) {
+    const row = node("tr");
+    const date = node("td");
+    date.append(
+      node("strong", "", day.date),
+      day.generated_at
+        ? node(
+            "small",
+            "",
+            `Sealed snapshot saved ${new Date(day.generated_at).toLocaleTimeString()}`,
+          )
+        : node("small", "", "Signed daily snapshot"),
+    );
+
+    const bundle = node("td");
+    const sealKnown = day.daily_seal_verified !== null && day.daily_seal_verified !== undefined;
+    const sealOk = sealKnown ? day.daily_seal_verified && day.daily_link_verified : day.signature_verified;
+    bundle.append(
+      badge(
+        sealKnown
+          ? sealOk
+            ? "Daily seal verified"
+            : "Daily seal issue"
+          : day.signature_verified
+            ? "Signed legacy bundle"
+            : "Signature issue",
+        sealOk ? "good" : day.signature_verified ? "neutral" : "bad",
+      ),
+    );
+    if (sealKnown)
+      bundle.append(
+        node(
+          "small",
+          "",
+          day.daily_link_verified
+            ? "Linked to the previous sealed day"
+            : "Previous-day link needs review",
+        ),
+      );
+
+    const integrity = node("td");
+    integrity.append(
+      badge(
+        day.verified ? "VERIFIED" : "NEEDS REVIEW",
+        day.verified ? "good" : "bad",
+      ),
+    );
+    if (!day.verified && day.issues?.length)
+      integrity.append(node("small", "", day.issues.join("; ")));
+
+    const actions = node("td");
+    const verifyButton = node("button", "text-button", "Verify");
+    verifyButton.addEventListener("click", () =>
+      action(verifyButton, async () => {
+        const result = await api(
+          `/api/evidence/daily/${encodeURIComponent(day.date)}/verify`,
+        );
+        toast(
+          result.verified
+            ? `${day.date} evidence bundle verified.`
+            : `${day.date} evidence needs review.`,
+        );
+        await loadDailyEvidence();
+      }),
+    );
+
+    const eventsButton = node("button", "text-button", "JSON Events ↓");
+    eventsButton.disabled = !day.verified;
+    eventsButton.addEventListener("click", () =>
+      action(eventsButton, () => downloadDailyEvidence(day.date, "events")),
+    );
+
+    const pdfButton = node("button", "text-button", "PDF Report ↓");
+    pdfButton.disabled = !day.verified;
+    pdfButton.addEventListener("click", () =>
+      action(pdfButton, () => downloadDailyEvidence(day.date, "pdf")),
+    );
+
+    const metadataButton = node("button", "text-button", "Hash & Metadata ↓");
+    metadataButton.disabled = !day.verified;
+    metadataButton.addEventListener("click", () =>
+      action(metadataButton, () => downloadDailyEvidence(day.date, "metadata")),
+    );
+
+    const zipButton = node("button", "text-button", "All Evidence ZIP ↓");
+    zipButton.disabled = !day.verified;
+    zipButton.addEventListener("click", () =>
+      action(zipButton, () => downloadDailyEvidence(day.date, "zip")),
+    );
+
+    actions.append(
+      verifyButton,
+      node("span", "action-separator", "·"),
+      eventsButton,
+      node("span", "action-separator", "·"),
+      pdfButton,
+      node("span", "action-separator", "·"),
+      metadataButton,
+      node("span", "action-separator", "·"),
+      zipButton,
+    );
+
+    row.append(
+      date,
+      node("td", "", number(day.event_count)),
+      bundle,
+      integrity,
+      actions,
+    );
+    tbody.append(row);
+  }
+}
+
+async function downloadDailyEvidence(date, format) {
+  const res = await fetch(
+    `/api/evidence/daily/${encodeURIComponent(date)}/download?format=${encodeURIComponent(format)}`,
+    { cache: "no-store" },
+  );
+  if (!res.ok) {
+    let data = {};
+    try {
+      data = await res.json();
+    } catch {}
+    throw new Error(errorText(data));
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const a = node("a");
+  a.href = url;
+  const names = {
+    zip: `cryptoveil_evidence_${date}.zip`,
+    events: `cryptoveil_events_${date}.jsonl`,
+    pdf: `cryptoveil_${date}.pdf`,
+    metadata: `cryptoveil_evidence_metadata_${date}.json`,
+    json: `cryptoveil_${date}.json`,
+  };
+  a.download = names[format] || `cryptoveil_${date}.${format}`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 async function loadReports() {
   const data = await api("/api/reports"),
     tbody = $("reports-body");
@@ -615,6 +1325,7 @@ async function poll() {
   try {
     await refreshStatus();
     if (state.view === "activity") await loadActivity();
+    if (state.view === "threats") await loadInvestigation();
   } catch (e) {
     $("app-status").textContent = "Application unavailable";
     $("app-dot").classList.remove("online");
@@ -631,6 +1342,14 @@ async function poll() {
       "Live verification is unavailable.",
       "The hashes shown are from the last successful connection.",
     );
+    $("first-run-card").hidden = false;
+    setBadge("first-run-progress", "Application offline", "bad");
+    setSetupStep(
+      "setup-app-icon",
+      "setup-app-text",
+      false,
+      "Reopen CryptoVeil to continue setup and protection.",
+    );
   } finally {
     state.polling = false;
   }
@@ -643,11 +1362,13 @@ function connectLive() {
   liveConnection.onopen = () => {
     state.live = true;
     $("app-status").textContent = "Live updates connected";
+    setBadge("pipeline-live", "Live", "good");
   };
   liveConnection.onerror = () => {
     state.live = false;
     $("app-status").textContent =
       "Reconnecting live updates · periodic refresh active";
+    setBadge("pipeline-live", "Polling", "neutral");
   };
   liveConnection.addEventListener("change", () => {
     if (liveRefresh) return;
@@ -676,9 +1397,12 @@ document
   .forEach((button) =>
     button.addEventListener("click", () => $(button.dataset.close).close()),
   );
-$("connect-button").addEventListener("click", () =>
-  $("connect-dialog").showModal(),
-);
+function openConnectDialog() {
+  $("connect-dialog").showModal();
+}
+$("connect-button").addEventListener("click", openConnectDialog);
+$("setup-connect-browser").addEventListener("click", openConnectDialog);
+$("setup-open-lab").addEventListener("click", () => selectView("lab"));
 $("pair-code-button").addEventListener("click", (event) =>
   action(
     event.currentTarget,
@@ -708,8 +1432,14 @@ $("verify-button").addEventListener("click", (event) =>
     toast("Evidence verification finished.");
   }),
 );
+$("refresh-runtime").addEventListener("click", (event) =>
+  action(event.currentTarget, loadRuntimeReadiness),
+);
 $("refresh-activity").addEventListener("click", (event) =>
   action(event.currentTarget, loadActivity),
+);
+$("refresh-threats").addEventListener("click", (event) =>
+  action(event.currentTarget, loadInvestigation),
 );
 $("refresh-reports").addEventListener("click", (event) =>
   action(event.currentTarget, loadReports),
@@ -738,6 +1468,36 @@ $("proof-button").addEventListener("click", (event) =>
     "proof-result",
   ),
 );
+document.querySelectorAll("[data-sensor-test]").forEach((button) =>
+  button.addEventListener("click", () =>
+    runSensorTest(button, button.dataset.sensorTest),
+  ),
+);
+$("run-integrity-simulation").addEventListener("click", (event) =>
+  runIntegritySimulation(event.currentTarget),
+);
+$("clear-lab-results").addEventListener("click", () => {
+  $("lab-results-body").replaceChildren();
+  $("lab-results-empty").hidden = false;
+  $("demo-simulation-panel").hidden = true;
+  $("lab-demo-results").replaceChildren();
+});
+
+$("verify-all-daily-evidence").addEventListener("click", (event) =>
+  action(event.currentTarget, async () => {
+    const result = await api("/api/evidence/daily/verify-all");
+    toast(
+      result.verified
+        ? `All ${result.dates_checked} date-wise evidence bundles verified.`
+        : "One or more date-wise evidence bundles need review.",
+    );
+    await loadDailyEvidence();
+  }),
+);
+$("refresh-daily-evidence").addEventListener("click", (event) =>
+  action(event.currentTarget, () => loadDailyEvidence()),
+);
+
 $("demo-button").addEventListener("click", (event) =>
   action(event.currentTarget, async () => {
     const data = await api("/api/forensics/demo", {});
@@ -756,8 +1516,12 @@ $("demo-button").addEventListener("click", (event) =>
     );
   }),
 );
+$("mode-simple").addEventListener("click", () => applyMode("simple"));
+$("mode-analyst").addEventListener("click", () => applyMode("analyst"));
+
 (async () => {
   try {
+    applyMode(state.mode);
     await bootstrap();
     selectView(location.hash.slice(1) || "overview");
     await poll();

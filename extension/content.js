@@ -126,10 +126,27 @@
     shadow.append(panel);
     document.documentElement.append(banner);
   }
-  chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.type === "cv_masking") setMasking(msg.active);
-    if (msg.type === "cv_trust_update" && msg.score < 65)
+  chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
+    if (msg.type === "cv_masking") {
+      setMasking(msg.active);
+      return false;
+    }
+    if (msg.type === "cv_trust_update" && msg.score < 65) {
       warning(msg.reasons || []);
+      return false;
+    }
+    if (msg.type === "cv_page_status") {
+      const sensitiveFields = [...document.querySelectorAll("input,textarea")].filter(
+        isSensitive,
+      ).length;
+      respond({
+        sensitive_fields_detected: sensitiveFields,
+        masking_active: masked,
+        shadow_ai_monitoring: true,
+      });
+      return false;
+    }
+    return false;
   });
   chrome.runtime
     .sendMessage({ type: "cv_get_page_settings" })

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+import sys
 import time
 import uuid
 from typing import Literal
@@ -16,6 +18,8 @@ from ..bus.events import BrowserTelemetryEvent, EventSeverity
 from ..forensics.audit_logger import AuditLogger, IntegrityError
 from ..reports.report_generator import describe_event, next_step
 from ..reports.store import valid_date
+from ..version import VERSION
+from .sensor_tests import SensorTestUnavailable
 
 router = APIRouter()
 
@@ -26,7 +30,7 @@ class StrictPayload(BaseModel):
 
 @router.get("/api/health")
 def health():
-    return {"status": "ok", "service": "cryptoveil-agent", "version": "2.2.0"}
+    return {"status": "ok", "service": "cryptoveil-agent", "version": VERSION}
 
 
 @router.get("/api/session")
@@ -281,6 +285,51 @@ def events(
     }
 
 
+@router.get("/api/runtime/readiness")
+def runtime_readiness(request: Request):
+    from .main import BASE_DIR
+
+    state = request.app.state
+    settings = state.settings
+    data_dir = settings.data_dir.resolve()
+    archive_dir = settings.archive_dir.resolve()
+    archive = state.audit_logger.archive.describe()
+
+    checks = {
+        "data_directory": data_dir.is_dir() and os.access(data_dir, os.W_OK),
+        "archive_directory": archive_dir.is_dir() and os.access(archive_dir, os.W_OK),
+        "rules_file": settings.rules_path.is_file(),
+        "dashboard_assets": (BASE_DIR / "dashboard" / "index.html").is_file(),
+        "extension_assets": (BASE_DIR / "extension" / "manifest.json").is_file(),
+        "evidence_integrity": bool(state.audit_logger.last_verification.get("verified")),
+    }
+    issues = [name for name, passed in checks.items() if not passed]
+
+    return {
+        "version": VERSION,
+        "packaged": bool(getattr(sys, "frozen", False)),
+        "loopback_only": True,
+        "healthy": not issues,
+        "checks": checks,
+        "issues": issues,
+        "paths": {
+            "data": str(data_dir),
+            "archive": str(archive_dir),
+            "rules": str(settings.rules_path.resolve()),
+        },
+        "archive": archive,
+        "sensors": [
+            {
+                "name": type(sensor).__name__,
+                "status": getattr(sensor, "status", "starting"),
+                "mode": getattr(sensor, "mode", None),
+                "detail": getattr(sensor, "last_error", None),
+            }
+            for sensor in state.sensors
+        ],
+    }
+
+
 @router.get("/api/status")
 def status(request: Request):
     from .main import BASE_DIR
@@ -389,9 +438,149 @@ def integrity_demo():
     return demonstrate_integrity()
 
 
+@router.post("/api/sensor-tests/{test_id}")
+async def run_sensor_test(
+    test_id: Literal["process_start", "ransomware_indicator"],
+    request: Request,
+):
+    try:
+        result = await request.app.state.sensor_tests.run(test_id)
+    except SensorTestUnavailable as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    request.app.state.live.notify()
+    return result
+
+
+@router.post("/api/simulations/integrity")
+def isolated_integrity_simulation():
+    from ..forensics.demo import demonstrate_integrity
+
+    return {
+        "mode": "isolated_demo",
+        "name": "Evidence tamper demonstration",
+        "safe": True,
+        "description": (
+            "Uses temporary sample evidence only. Live CryptoVeil evidence is not changed."
+        ),
+        "result": demonstrate_integrity(),
+    }
+
+
 @router.get("/api/process/graph")
 def process_graph(request: Request):
     return request.app.state.mitre_engine.graph()
+
+
+@router.get("/api/investigation")
+def investigation(request: Request):
+    state = request.app.state
+    entries = state.audit_logger.recent_entries(500)
+
+    def is_investigation_event(entry: dict) -> bool:
+        event = entry.get("event", {})
+        topic = event.get("topic", "")
+        kind = event.get("event_kind", "")
+        return (
+            topic
+            in {
+                "engine.mitre.alert",
+                "engine.network.c2",
+                "engine.network.dga",
+                "engine.antiforensic.detected",
+                "engine.correlation.finding",
+                "sensor.clipboard.swap",
+            }
+            or (topic == "sensor.filesystem.entropy" and bool(event.get("burst_triggered")))
+            or (topic == "browser.telemetry" and kind == "site_warning")
+        )
+
+    selected = [entry for entry in entries if is_investigation_event(entry)]
+    recent = [event_view(entry) for entry in reversed(selected[-100:])]
+
+    techniques: dict[tuple[str, str], int] = {}
+    for entry in selected:
+        event = entry.get("event", {})
+        if event.get("topic") == "engine.mitre.alert":
+            key = (event.get("mitre_id", "Unknown"), event.get("mitre_name", "Unknown"))
+            techniques[key] = techniques.get(key, 0) + 1
+        for mitre_id in event.get("mitre_ids", []) or []:
+            key = (mitre_id, "Correlated finding")
+            techniques[key] = techniques.get(key, 0) + 1
+
+    severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    for entry in selected:
+        severity = entry.get("event", {}).get("severity", "info")
+        severity_counts[severity if severity in severity_counts else "info"] += 1
+
+    return {
+        "window": "Latest 500 stored events",
+        "summary": {
+            "findings": len(selected),
+            "critical": severity_counts["critical"],
+            "high": severity_counts["high"],
+            "mitre_alerts": sum(
+                entry.get("event", {}).get("topic") == "engine.mitre.alert"
+                for entry in selected
+            ),
+            "correlated_findings": sum(
+                entry.get("event", {}).get("topic") == "engine.correlation.finding"
+                for entry in selected
+            ),
+        },
+        "mitre_techniques": [
+            {"id": key[0], "name": key[1], "count": count}
+            for key, count in sorted(
+                techniques.items(), key=lambda item: (-item[1], item[0][0])
+            )
+        ],
+        "recent_findings": recent,
+        "process_graph": state.mitre_engine.graph(),
+    }
+
+
+@router.get("/api/evidence/daily")
+def daily_evidence(request: Request):
+    audit = request.app.state.audit_logger
+    return {
+        "archive": audit.archive.describe(),
+        "days": request.app.state.report_store.list_reports(),
+    }
+
+
+@router.get("/api/evidence/daily/verify-all")
+def verify_all_daily_evidence(request: Request):
+    return request.app.state.report_store.verify_all_dates()
+
+
+@router.get("/api/evidence/daily/{date}/verify")
+def verify_daily_evidence(date: str, request: Request):
+    try:
+        return request.app.state.report_store.verify(valid_date(date))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.get("/api/evidence/daily/{date}/download")
+def download_daily_evidence(
+    date: str,
+    request: Request,
+    format: Literal["zip", "json", "pdf", "events", "metadata"] = "zip",
+):
+    try:
+        data, media_type, filename = request.app.state.report_store.download(
+            valid_date(date), format
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except IntegrityError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return Response(
+        data,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/api/reports")

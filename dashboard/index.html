@@ -21,16 +21,22 @@
           data-view="overview"
           aria-current="page"
         >
-          <span aria-hidden="true">◫</span> Overview
+          <span aria-hidden="true">◫</span> Command Center
         </button>
         <button class="nav-item" data-view="activity">
           <span aria-hidden="true">≋</span> Activity
+        </button>
+        <button class="nav-item" data-view="threats">
+          <span aria-hidden="true">◎</span> Threats
         </button>
         <button class="nav-item" data-view="evidence">
           <span aria-hidden="true">◇</span> Evidence
         </button>
         <button class="nav-item" data-view="reports">
           <span aria-hidden="true">▤</span> Daily reports
+        </button>
+        <button class="nav-item" data-view="lab">
+          <span aria-hidden="true">△</span> Simulation Lab
         </button>
       </nav>
       <div class="sidebar-note">
@@ -42,13 +48,21 @@
       <div class="sidebar-bottom">
         <span class="connection-dot" id="app-dot"></span
         ><span id="app-status" role="status">Connecting to app…</span
-        ><small>CryptoVeil 2.1</small>
+        ><small>CryptoVeil 2.2</small>
       </div>
     </aside>
     <div class="workspace">
       <header class="topbar">
-        <span id="breadcrumb">Workspace / Overview</span>
+        <span id="breadcrumb">Workspace / Command Center</span>
         <div>
+          <div class="mode-switch" role="group" aria-label="Interface detail level">
+            <button id="mode-simple" class="mode-button active" aria-pressed="true">
+              Simple
+            </button>
+            <button id="mode-analyst" class="mode-button" aria-pressed="false">
+              Analyst
+            </button>
+          </div>
           <span class="date-label" id="today-label"></span
           ><button class="button secondary" id="connect-button">
             Connect browser <span aria-hidden="true">↗</span>
@@ -64,9 +78,9 @@
         >
           <div class="page-heading">
             <div>
-              <span class="eyebrow">YOUR SECURITY AT A GLANCE</span>
-              <h1 id="overview-title">A clearer view of your security.</h1>
-              <p>See what needs attention. Keep evidence you can verify.</p>
+              <span class="eyebrow">LIVE COMMAND CENTER</span>
+              <h1 id="overview-title">Your protection status.</h1>
+              <p>Understand what is protected, what needs attention, and whether your evidence is trustworthy.</p>
             </div>
             <span class="badge neutral" id="overview-badge"
               >Checking status</span
@@ -76,6 +90,165 @@
             <strong>Getting ready</strong>
             <p>Waiting for the application to report its status.</p>
           </div>
+
+          <article id="first-run-card" class="panel first-run-card">
+            <div class="panel-heading">
+              <div>
+                <span class="eyebrow">QUICK SETUP</span>
+                <h2>Get protected in three steps</h2>
+                <p>
+                  CryptoVeil keeps the setup short. Each step turns complete
+                  automatically when the real application state is ready.
+                </p>
+              </div>
+              <span id="first-run-progress" class="badge neutral">Checking</span>
+            </div>
+            <div class="setup-steps">
+              <div class="setup-step">
+                <span id="setup-app-icon" class="setup-step-icon" data-step="1">1</span>
+                <div>
+                  <strong>Application ready</strong>
+                  <small id="setup-app-text">Checking local protection services…</small>
+                </div>
+              </div>
+              <div class="setup-step">
+                <span id="setup-browser-icon" class="setup-step-icon" data-step="2">2</span>
+                <div>
+                  <strong>Connect your browser</strong>
+                  <small id="setup-browser-text">Pair the CryptoVeil extension once.</small>
+                </div>
+                <button class="button secondary compact" id="setup-connect-browser">
+                  Connect
+                </button>
+              </div>
+              <div class="setup-step">
+                <span id="setup-monitoring-icon" class="setup-step-icon" data-step="3">3</span>
+                <div>
+                  <strong>Confirm monitoring</strong>
+                  <small id="setup-monitoring-text">Checking endpoint sensors and evidence integrity…</small>
+                </div>
+                <button class="button secondary compact" id="setup-open-lab">
+                  Safe test
+                </button>
+              </div>
+            </div>
+          </article>
+
+          <section class="protection-grid" aria-label="Protection status">
+            <article class="protection-item">
+              <span class="protection-icon" aria-hidden="true">B</span>
+              <div>
+                <strong>Browser Protection</strong>
+                <small>Paired browser telemetry and website trust checks</small>
+              </div>
+              <span id="protect-browser" class="badge neutral">Checking</span>
+            </article>
+            <article class="protection-item">
+              <span class="protection-icon" aria-hidden="true">E</span>
+              <div>
+                <strong>Endpoint Monitoring</strong>
+                <small>Process, file, clipboard, and network sensors</small>
+              </div>
+              <span id="protect-endpoint" class="badge neutral">Checking</span>
+            </article>
+            <article class="protection-item">
+              <span class="protection-icon" aria-hidden="true">R</span>
+              <div>
+                <strong>Ransomware Monitoring</strong>
+                <small>File entropy and burst-behavior observation</small>
+              </div>
+              <span id="protect-ransomware" class="badge neutral">Checking</span>
+            </article>
+            <article class="protection-item">
+              <span class="protection-icon" aria-hidden="true">C</span>
+              <div>
+                <strong>Clipboard Protection</strong>
+                <small>Clipboard transition monitoring without storing text</small>
+              </div>
+              <span id="protect-clipboard" class="badge neutral">Checking</span>
+            </article>
+            <article class="protection-item">
+              <span class="protection-icon" aria-hidden="true">AI</span>
+              <div>
+                <strong>Shadow AI Monitoring</strong>
+                <small>Known AI-service and page-component observations</small>
+              </div>
+              <span id="protect-shadow" class="badge neutral">Checking</span>
+            </article>
+            <article class="protection-item">
+              <span class="protection-icon" aria-hidden="true">V</span>
+              <div>
+                <strong>Evidence Integrity</strong>
+                <small>Hash-chain, Merkle, and signature verification</small>
+              </div>
+              <span id="protect-evidence" class="badge neutral">Checking</span>
+            </article>
+          </section>
+
+          <article class="panel pipeline-panel">
+            <div class="panel-heading">
+              <div>
+                <span class="eyebrow">LIVE SECURITY PIPELINE</span>
+                <h2>From activity to verified evidence</h2>
+                <p>Each stage reflects the current application state, not a demo value.</p>
+              </div>
+            </div>
+            <div class="pipeline" aria-label="CryptoVeil live processing pipeline">
+              <div class="pipeline-stage">
+                <span class="pipeline-label">Browser</span>
+                <strong>Telemetry</strong>
+                <span id="pipeline-browser" class="badge neutral">Checking</span>
+                <small class="analyst-only">Authenticated extension events</small>
+              </div>
+              <span class="pipeline-arrow" aria-hidden="true">→</span>
+              <div class="pipeline-stage">
+                <span class="pipeline-label">Device</span>
+                <strong>OS Sensors</strong>
+                <span id="pipeline-endpoint" class="badge neutral">Checking</span>
+                <small class="analyst-only">Process · files · clipboard · network</small>
+              </div>
+              <span class="pipeline-arrow" aria-hidden="true">→</span>
+              <div class="pipeline-stage">
+                <span class="pipeline-label">Analysis</span>
+                <strong>Threat Engines</strong>
+                <span id="pipeline-analysis" class="badge neutral">Checking</span>
+                <small class="analyst-only">MITRE · correlation · C2/DGA</small>
+              </div>
+              <span class="pipeline-arrow" aria-hidden="true">→</span>
+              <div class="pipeline-stage">
+                <span class="pipeline-label">Forensics</span>
+                <strong>Evidence</strong>
+                <span id="pipeline-evidence" class="badge neutral">Checking</span>
+                <small class="analyst-only">SHA-256 · Merkle · Ed25519</small>
+              </div>
+              <span class="pipeline-arrow" aria-hidden="true">→</span>
+              <div class="pipeline-stage">
+                <span class="pipeline-label">Interface</span>
+                <strong>Live SOC</strong>
+                <span id="pipeline-live" class="badge neutral">Checking</span>
+                <small class="analyst-only">SSE live updates with polling fallback</small>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel runtime-panel analyst-only">
+            <div class="panel-heading">
+              <div>
+                <span class="eyebrow">RUNTIME READINESS</span>
+                <h2>Application environment</h2>
+                <p>
+                  Confirms that the packaged application can access its rules,
+                  persistent storage, dashboard assets, and evidence archive.
+                </p>
+              </div>
+              <button class="text-button" id="refresh-runtime">
+                Run checks
+              </button>
+            </div>
+            <div id="runtime-checks" class="runtime-checks"></div>
+            <p id="runtime-path-note" class="fine-print"></p>
+          </article>
+
           <div class="metric-grid">
             <article class="metric">
               <span class="metric-label">Evidence records</span
@@ -121,6 +294,9 @@
                 </div>
               </div>
               <div id="sensor-list" class="sensor-list"></div>
+              <p class="analyst-only analyst-note">
+                Analyst mode shows sensor transport modes and fallback coverage so you can verify what is actually running.
+              </p>
               <p class="fine-print">
                 A detection is a reason to investigate. It does not, on its own,
                 prove that an attack occurred.
@@ -197,6 +373,127 @@
         </section>
         <section
           class="view"
+          id="view-threats"
+          aria-labelledby="threats-title"
+          hidden
+        >
+          <div class="page-heading">
+            <div>
+              <span class="eyebrow">INVESTIGATE & TRACE</span>
+              <h1 id="threats-title">Threat investigation</h1>
+              <p>
+                Review suspicious behavior with process context, MITRE ATT&CK
+                mapping, and linked evidence.
+              </p>
+            </div>
+            <button class="button secondary" id="refresh-threats">
+              Refresh
+            </button>
+          </div>
+
+          <div class="metric-grid threat-metrics">
+            <article class="metric">
+              <span class="metric-label">Findings to review</span>
+              <strong id="threat-findings">—</strong>
+              <small>Within the latest 500 stored events</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">Critical findings</span>
+              <strong id="threat-critical">—</strong>
+              <small>Highest-priority investigation items</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">MITRE alerts</span>
+              <strong id="threat-mitre">—</strong>
+              <small>Process behavior matched to ATT&CK rules</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">Correlated findings</span>
+              <strong id="threat-correlated">—</strong>
+              <small>Related observations within the correlation window</small>
+            </article>
+          </div>
+
+          <div class="investigation-grid">
+            <article class="panel">
+              <div class="panel-heading">
+                <div>
+                  <span class="eyebrow">LIVE PROCESS RELATIONSHIPS</span>
+                  <h2>Flagged process paths</h2>
+                  <p>
+                    Active process lineage is shown only from real process
+                    observations.
+                  </p>
+                </div>
+                <span id="process-graph-count" class="badge neutral">Checking</span>
+              </div>
+              <div id="process-graph-wrap" class="process-graph-wrap">
+                <svg
+                  id="process-graph-svg"
+                  role="img"
+                  aria-label="Live suspicious process relationship graph"
+                  preserveAspectRatio="xMinYMin meet"
+                ></svg>
+                <p id="process-graph-empty" class="empty-state" hidden>
+                  No active suspicious process relationship is currently flagged.
+                </p>
+              </div>
+              <p class="fine-print analyst-only">
+                A highlighted process is an ATT&CK-aligned behavioral indicator.
+                It is not a malware verdict. Select a highlighted node to open
+                its stored evidence.
+              </p>
+            </article>
+
+            <article class="panel">
+              <div class="panel-heading">
+                <div>
+                  <span class="eyebrow">MITRE ATT&CK CONTEXT</span>
+                  <h2>Techniques observed</h2>
+                </div>
+              </div>
+              <div id="mitre-technique-list" class="technique-list"></div>
+              <p id="mitre-technique-empty" class="empty-state" hidden>
+                No MITRE ATT&CK-aligned process alert appears in the current
+                investigation window.
+              </p>
+            </article>
+          </div>
+
+          <article class="panel findings-panel">
+            <div class="panel-heading">
+              <div>
+                <span class="eyebrow">RECENT INVESTIGATION ITEMS</span>
+                <h2>What needs review</h2>
+                <p>
+                  Open an item to see what happened, why CryptoVeil noticed it,
+                  and the recommended next step.
+                </p>
+              </div>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Time</th>
+                    <th scope="col">Finding</th>
+                    <th scope="col">Level</th>
+                    <th scope="col">Context</th>
+                    <th scope="col">Evidence</th>
+                  </tr>
+                </thead>
+                <tbody id="threat-findings-body"></tbody>
+              </table>
+            </div>
+            <p id="threat-findings-empty" class="empty-state" hidden>
+              No investigation findings are present in the latest evidence
+              window.
+            </p>
+          </article>
+        </section>
+
+        <section
+          class="view"
           id="view-evidence"
           aria-labelledby="evidence-title"
           hidden
@@ -226,7 +523,7 @@
               </div>
               <span class="badge neutral" id="root-match">Not checked</span>
             </div>
-            <div class="hash-grid">
+            <div class="hash-grid analyst-only">
               <div class="hash-card">
                 <span class="eyebrow">ORIGINAL SIGNED BASELINE</span
                 ><code id="original-root">Waiting for verification</code
@@ -267,6 +564,45 @@
               pauses new collection after an integrity failure.
             </p>
           </article>
+          <article class="panel daily-evidence-panel">
+            <div class="panel-heading">
+              <div>
+                <span class="eyebrow">DATE-WISE OFF-HOST EVIDENCE</span>
+                <h2>Evidence by day</h2>
+                <p>
+                  Download the signed evidence bundle for a specific day or
+                  verify that day before export.
+                </p>
+              </div>
+              <div class="evidence-actions">
+                <button class="button secondary" id="verify-all-daily-evidence">
+                  Verify all dates
+                </button>
+                <button class="button secondary" id="refresh-daily-evidence">
+                  Refresh
+                </button>
+              </div>
+            </div>
+            <div id="archive-trust-note" class="archive-trust-note"></div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Date</th>
+                    <th scope="col">Events</th>
+                    <th scope="col">Daily seal</th>
+                    <th scope="col">Integrity</th>
+                    <th scope="col">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="daily-evidence-body"></tbody>
+              </table>
+            </div>
+            <p class="empty-state" id="daily-evidence-empty" hidden>
+              No date-wise evidence bundles have been saved yet.
+            </p>
+          </article>
+
           <div class="overview-grid evidence-bottom">
             <article class="panel">
               <h2>Evidence archive</h2>
@@ -277,7 +613,7 @@
               <button class="text-button" data-go="reports">
                 Open daily reports →
               </button>
-              <details>
+              <details class="analyst-only">
                 <summary>Storage and trust details</summary>
                 <dl class="detail-list">
                   <dt>Application data</dt>
@@ -388,6 +724,143 @@
             checked again before every download.
           </p>
         </section>
+
+        <section
+          class="view"
+          id="view-lab"
+          aria-labelledby="lab-title"
+          hidden
+        >
+          <div class="page-heading">
+            <div>
+              <span class="eyebrow">VALIDATE WITHOUT CONFUSION</span>
+              <h1 id="lab-title">Simulation Lab</h1>
+              <p>
+                Real sensor tests create harmless operating-system activity.
+                Demo simulations stay isolated and never pretend to be live detections.
+              </p>
+            </div>
+            <span class="badge neutral">Safe validation</span>
+          </div>
+
+          <div class="lab-warning">
+            <strong>Know what you are running.</strong>
+            <p>
+              Real Sensor Tests use the actual CryptoVeil sensors and evidence pipeline.
+              Demo Simulations use temporary sample data only. Neither section executes
+              malware or destructive commands.
+            </p>
+          </div>
+
+          <div class="lab-grid">
+            <article class="panel lab-panel">
+              <div class="panel-heading">
+                <div>
+                  <span class="eyebrow">REAL SENSOR TESTS</span>
+                  <h2>Validate the actual monitoring pipeline</h2>
+                  <p>
+                    The test passes only if real sensor evidence is stored by CryptoVeil.
+                  </p>
+                </div>
+                <span class="badge good">Real activity</span>
+              </div>
+
+              <div class="lab-test-card">
+                <div>
+                  <strong>Process Start Detection</strong>
+                  <p>
+                    Starts a harmless short-lived Python process and waits for the
+                    real ProcessWatcher to store the process-start evidence.
+                  </p>
+                </div>
+                <button class="button primary" data-sensor-test="process_start">
+                  Run process test
+                </button>
+              </div>
+
+              <div class="lab-test-card">
+                <div>
+                  <strong>Ransomware Behavioral Indicator</strong>
+                  <p>
+                    Creates temporary high-entropy test files in a configured watched
+                    folder and waits for the real burst-entropy sensor. Test files are
+                    removed automatically afterward.
+                  </p>
+                </div>
+                <button class="button primary" data-sensor-test="ransomware_indicator">
+                  Run file sensor test
+                </button>
+              </div>
+            </article>
+
+            <article class="panel lab-panel">
+              <div class="panel-heading">
+                <div>
+                  <span class="eyebrow">DEMO SIMULATIONS</span>
+                  <h2>Demonstrate forensic behavior safely</h2>
+                  <p>
+                    These demonstrations use temporary data and are clearly separate
+                    from live sensor detections.
+                  </p>
+                </div>
+                <span class="badge neutral">Isolated</span>
+              </div>
+
+              <div class="lab-test-card">
+                <div>
+                  <strong>Evidence Tamper Demonstration</strong>
+                  <p>
+                    Builds temporary sample evidence, modifies or removes copies, and
+                    demonstrates how verification detects each change.
+                  </p>
+                </div>
+                <button class="button secondary" id="run-integrity-simulation">
+                  Run isolated demo
+                </button>
+              </div>
+            </article>
+          </div>
+
+          <article class="panel lab-results-panel">
+            <div class="panel-heading">
+              <div>
+                <span class="eyebrow">VALIDATION RESULTS</span>
+                <h2>Expected versus actual detection</h2>
+              </div>
+              <button class="text-button" id="clear-lab-results">Clear results</button>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Test</th>
+                    <th scope="col">Type</th>
+                    <th scope="col">Expected</th>
+                    <th scope="col">Actual</th>
+                    <th scope="col">Latency</th>
+                    <th scope="col">Evidence</th>
+                    <th scope="col">Result</th>
+                  </tr>
+                </thead>
+                <tbody id="lab-results-body"></tbody>
+              </table>
+            </div>
+            <p id="lab-results-empty" class="empty-state">
+              Run a validation above to see the measured result.
+            </p>
+          </article>
+
+          <article class="panel demo-results-panel" id="demo-simulation-panel" hidden>
+            <div class="panel-heading">
+              <div>
+                <span class="eyebrow">ISOLATED DEMO OUTPUT</span>
+                <h2>Evidence tamper verification</h2>
+              </div>
+              <span class="badge neutral">Temporary sample data</span>
+            </div>
+            <div id="lab-demo-results"></div>
+          </article>
+        </section>
       </main>
       <footer>
         CryptoVeil <span>Local security observations. Verifiable evidence.</span
@@ -453,26 +926,37 @@
           ×
         </button>
       </div>
-      <p id="event-summary"></p>
-      <div class="banner neutral">
-        <strong>Suggested next step</strong>
-        <p id="event-action"></p>
-        <div id="related-evidence" hidden></div>
+      <div class="event-explanation-grid">
+        <section class="event-explanation">
+          <span class="eyebrow">WHAT HAPPENED</span>
+          <p id="event-summary"></p>
+        </section>
+        <section class="event-explanation">
+          <span class="eyebrow">WHY CRYPTOVEIL NOTICED IT</span>
+          <p id="event-reason"></p>
+        </section>
+        <section class="event-explanation">
+          <span class="eyebrow">WHAT YOU SHOULD DO</span>
+          <p id="event-action"></p>
+        </section>
       </div>
+      <div id="related-evidence" class="related-evidence" hidden></div>
       <dl class="detail-list">
         <dt>Recorded at</dt>
         <dd id="event-time"></dd>
-        <dt>Original record hash</dt>
-        <dd><code id="event-hash"></code></dd>
+        <dt class="analyst-only">Original record hash</dt>
+        <dd class="analyst-only"><code id="event-hash"></code></dd>
       </dl>
-      <button class="button secondary" id="proof-button">
-        Verify this record’s inclusion proof
-      </button>
-      <p id="proof-result" role="status"></p>
-      <details>
-        <summary>Technical event details</summary>
-        <pre id="event-json"></pre>
-      </details>
+      <div class="analyst-only">
+        <button class="button secondary" id="proof-button">
+          Verify this record’s inclusion proof
+        </button>
+        <p id="proof-result" role="status"></p>
+        <details>
+          <summary>Technical event details</summary>
+          <pre id="event-json"></pre>
+        </details>
+      </div>
     </dialog>
     <div id="toast" class="toast" role="status" hidden></div>
   </body>

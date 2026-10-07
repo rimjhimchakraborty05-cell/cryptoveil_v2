@@ -29,9 +29,11 @@ from ..reports.store import ReportStore
 from ..sensors.clipboard_watcher import ClipboardWatcher
 from ..sensors.entropy_watcher import EntropyWatcher
 from ..sensors.process_watcher import ProcessWatcher
+from ..version import VERSION
 from . import routes
 from .live import LiveUpdates
 from .security import PairingManager, access_guard
+from .sensor_tests import SensorTestRunner
 
 log = logging.getLogger("cryptoveil.server")
 BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
@@ -159,6 +161,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         sensor.last_error = str(exc)
                         log.exception("Sensor failed to start")
 
+            application.state.sensor_tests = SensorTestRunner(
+                audit, sensors, settings.watch_paths
+            )
+
             async def monitor():
                 while True:
                     await asyncio.sleep(settings.verification_seconds)
@@ -198,7 +204,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     application = FastAPI(
         title="CryptoVeil",
-        version="2.2.0",
+        version=VERSION,
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,

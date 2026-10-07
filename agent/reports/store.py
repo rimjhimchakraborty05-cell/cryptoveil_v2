@@ -16,7 +16,12 @@ import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ..forensics.audit_logger import AuditLogger, IntegrityError
+from ..forensics.audit_logger import (
+    GENESIS_HASH,
+    AuditLogger,
+    IntegrityError,
+    merkle_root,
+)
 from ..forensics.storage import canonical, decode_object, immutable_write
 from .export import export
 from .report_generator import day_bounds
@@ -58,16 +63,67 @@ class ReportStore:
                 pass
         return sorted(dates, reverse=True)
 
+    def _latest_verified_daily_seal_before(self, date: str) -> dict | None:
+        for candidate in sorted((d for d in self.dates() if d < date), reverse=True):
+            result, files = self._verify_snapshot(candidate, check_daily_link=False)
+            if not result["verified"] or "daily_seal.json" not in files:
+                continue
+            try:
+                seal = decode_object(files["daily_seal.json"])
+            except (TypeError, ValueError):
+                continue
+            if self.audit.verify_signature(seal, self.audit.public_key):
+                return seal
+        return None
+
     def save(self, report: dict, formats: tuple[str, ...] = ("pdf", "csv", "json")) -> dict:
         with self._lock:
             date = valid_date(report["date"])
             version = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ") + "-" + secrets.token_hex(3)
             directory = self.directory / date / version
+            evidence = report["evidence"]
             files = {}
             for fmt in dict.fromkeys(("json",) + formats):
                 files[f"report.{fmt}"] = export(report, fmt)[0]
-            files["evidence.jsonl"] = b"".join(canonical(e) + b"\n" for e in report["evidence"])
+            files["evidence.jsonl"] = b"".join(canonical(e) + b"\n" for e in evidence)
             files["checkpoints.json"] = canonical(report["checkpoints"])
+            files["daily_summary.json"] = canonical(
+                {
+                    "schema_version": 1,
+                    "kind": "daily_security_summary",
+                    "date": date,
+                    "timezone": report["timezone"],
+                    "generated_at": report["generated_at"],
+                    "executive_summary": report["executive_summary"],
+                    "browser_security": report["browser_security"],
+                    "endpoint_security": report["endpoint_security"],
+                    "forensic_integrity": {
+                        "verified": report["forensic_integrity"].get("verified"),
+                        "total_events": report["forensic_integrity"].get("total_events"),
+                        "checkpoint_count": report["forensic_integrity"].get("checkpoint_count"),
+                    },
+                }
+            )
+
+            previous = self._latest_verified_daily_seal_before(date)
+            seal = self.audit.sign(
+                {
+                    "schema_version": 1,
+                    "kind": "daily_evidence_seal",
+                    "date": date,
+                    "timezone": report["timezone"],
+                    "start_seq": evidence[0]["seq"] if evidence else None,
+                    "end_seq": evidence[-1]["seq"] if evidence else None,
+                    "event_count": len(evidence),
+                    "final_chain_hash": evidence[-1]["hash"] if evidence else GENESIS_HASH,
+                    "daily_merkle_root": merkle_root([entry["hash"] for entry in evidence]),
+                    "previous_day_root": (
+                        previous.get("daily_merkle_root") if previous else GENESIS_HASH
+                    ),
+                    "sealed_at": datetime.now(UTC).isoformat(),
+                }
+            )
+            files["daily_seal.json"] = canonical(seal)
             manifest = self.audit.sign(
                 {
                     "schema_version": 2,
@@ -97,7 +153,10 @@ class ReportStore:
             return result
 
     def _verify_snapshot(
-        self, date: str, version: str | None = None
+        self,
+        date: str,
+        version: str | None = None,
+        check_daily_link: bool = True,
     ) -> tuple[dict, dict[str, bytes]]:
         """Read each file once; downloads serve exactly the bytes we verified."""
         valid_date(date)
@@ -154,6 +213,8 @@ class ReportStore:
                 "report.pdf",
                 "evidence.jsonl",
                 "checkpoints.json",
+                "daily_seal.json",
+                "daily_summary.json",
             }:
                 issues.append("Unexpected file in manifest")
                 continue
@@ -164,9 +225,52 @@ class ReportStore:
                     issues.append(f"{name} was modified")
             except OSError:
                 issues.append(f"{name} is missing")
+        daily_seal_verified = None
+        daily_link_verified = None
+        if "daily_seal.json" in files and "report.json" in files:
+            daily_seal_verified = False
+            daily_link_verified = False
+            try:
+                seal = decode_object(files["daily_seal.json"])
+                report = decode_object(files["report.json"])
+                evidence = report.get("evidence", [])
+                hashes = [entry["hash"] for entry in evidence]
+                expected = {
+                    "date": date,
+                    "start_seq": evidence[0]["seq"] if evidence else None,
+                    "end_seq": evidence[-1]["seq"] if evidence else None,
+                    "event_count": len(evidence),
+                    "final_chain_hash": evidence[-1]["hash"] if evidence else GENESIS_HASH,
+                    "daily_merkle_root": merkle_root(hashes),
+                }
+                daily_seal_verified = (
+                    seal.get("kind") == "daily_evidence_seal"
+                    and seal.get("schema_version") == 1
+                    and all(seal.get(key) == value for key, value in expected.items())
+                    and self.audit.verify_signature(seal, self.audit.public_key)
+                )
+                if not daily_seal_verified:
+                    issues.append("Daily evidence seal is invalid or does not match the evidence")
+                elif check_daily_link:
+                    previous = self._latest_verified_daily_seal_before(date)
+                    expected_previous = (
+                        previous.get("daily_merkle_root") if previous else GENESIS_HASH
+                    )
+                    daily_link_verified = seal.get("previous_day_root") == expected_previous
+                    if not daily_link_verified:
+                        issues.append("Daily evidence seal does not link to the previous sealed day")
+                else:
+                    daily_link_verified = True
+            except (KeyError, TypeError, ValueError):
+                issues.append("Daily evidence seal is malformed")
+                daily_seal_verified = False
+                daily_link_verified = False
+
         return {
             "verified": not issues,
             "signature_verified": signature_ok,
+            "daily_seal_verified": daily_seal_verified,
+            "daily_link_verified": daily_link_verified,
             "date": date,
             "version": version,
             "status": "VERIFIED" if not issues else "MODIFIED_OR_MISSING",
@@ -190,6 +294,14 @@ class ReportStore:
     def list_reports(self) -> list[dict]:
         return [self.verify(date) for date in self.dates()]
 
+    def verify_all_dates(self) -> dict:
+        results = [self.verify(date) for date in sorted(self.dates())]
+        return {
+            "verified": all(result["verified"] for result in results),
+            "dates_checked": len(results),
+            "results": results,
+        }
+
     def download(self, date: str, fmt: str) -> tuple[bytes, str, str]:
         with self._lock:
             result, files = self._verify_snapshot(date)
@@ -203,9 +315,33 @@ class ReportStore:
                     for name, data in files.items():
                         bundle.writestr(name, data)
                 return buffer.getvalue(), "application/zip", f"cryptoveil_evidence_{date}.zip"
+            if fmt == "events":
+                if "evidence.jsonl" not in files:
+                    raise ValueError("Event evidence is unavailable for this snapshot")
+                return (
+                    files["evidence.jsonl"],
+                    "application/x-ndjson",
+                    f"cryptoveil_events_{date}.jsonl",
+                )
+            if fmt == "metadata":
+                metadata = {
+                    "date": date,
+                    "verification": result,
+                    "manifest": decode_object(files["manifest.json"]),
+                    "daily_seal": (
+                        decode_object(files["daily_seal.json"])
+                        if "daily_seal.json" in files
+                        else None
+                    ),
+                }
+                return (
+                    canonical(metadata),
+                    "application/json",
+                    f"cryptoveil_evidence_metadata_{date}.json",
+                )
             media_types = {"pdf": "application/pdf", "csv": "text/csv", "json": "application/json"}
             if fmt not in media_types:
-                raise ValueError("Use pdf, csv, json or zip")
+                raise ValueError("Use pdf, csv, json, events, metadata or zip")
             name = f"report.{fmt}"
             if name not in files:
                 raise ValueError("This format was not enabled for the saved snapshot")
