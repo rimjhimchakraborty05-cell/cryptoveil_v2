@@ -315,9 +315,33 @@ class ReportStore:
                     for name, data in files.items():
                         bundle.writestr(name, data)
                 return buffer.getvalue(), "application/zip", f"cryptoveil_evidence_{date}.zip"
+            if fmt == "events":
+                if "evidence.jsonl" not in files:
+                    raise ValueError("Event evidence is unavailable for this snapshot")
+                return (
+                    files["evidence.jsonl"],
+                    "application/x-ndjson",
+                    f"cryptoveil_events_{date}.jsonl",
+                )
+            if fmt == "metadata":
+                metadata = {
+                    "date": date,
+                    "verification": result,
+                    "manifest": decode_object(files["manifest.json"]),
+                    "daily_seal": (
+                        decode_object(files["daily_seal.json"])
+                        if "daily_seal.json" in files
+                        else None
+                    ),
+                }
+                return (
+                    canonical(metadata),
+                    "application/json",
+                    f"cryptoveil_evidence_metadata_{date}.json",
+                )
             media_types = {"pdf": "application/pdf", "csv": "text/csv", "json": "application/json"}
             if fmt not in media_types:
-                raise ValueError("Use pdf, csv, json or zip")
+                raise ValueError("Use pdf, csv, json, events, metadata or zip")
             name = f"report.{fmt}"
             if name not in files:
                 raise ValueError("This format was not enabled for the saved snapshot")
