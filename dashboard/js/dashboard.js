@@ -18,6 +18,7 @@ const titles = {
   threats: "Threat Investigation",
   evidence: "Evidence",
   reports: "Daily reports",
+  lab: "Simulation Lab",
 };
 function node(tag, cls, text) {
   const n = document.createElement(tag);
@@ -874,6 +875,114 @@ async function loadInvestigation() {
   renderInvestigation(await api("/api/investigation"));
 }
 
+function appendSensorTestResult(result) {
+  const tbody = $("lab-results-body");
+  $("lab-results-empty").hidden = true;
+
+  const row = node("tr");
+  const name = node("td");
+  name.append(
+    node("strong", "", result.name),
+    node("small", "", result.detail),
+  );
+
+  const evidence = node("td");
+  if (result.evidence_id) {
+    const button = node(
+      "button",
+      "text-button",
+      result.seq === null || result.seq === undefined
+        ? "Open evidence"
+        : `Open #${result.seq}`,
+    );
+    button.addEventListener("click", () =>
+      action(button, async () =>
+        openEvent(
+          await api(
+            `/api/events/id/${encodeURIComponent(result.evidence_id)}`,
+          ),
+        ),
+      ),
+    );
+    evidence.append(button);
+  } else {
+    evidence.textContent = "Not stored";
+  }
+
+  const status = node("td");
+  status.append(
+    badge(result.passed ? "PASS" : "FAIL", result.passed ? "good" : "bad"),
+  );
+
+  row.append(
+    name,
+    node("td", "", "Real sensor"),
+    node("td", "", result.expected_detection),
+    node("td", "", result.actual_detection),
+    node(
+      "td",
+      "",
+      Number.isFinite(result.latency_ms)
+        ? `${result.latency_ms.toLocaleString()} ms`
+        : "—",
+    ),
+    evidence,
+    status,
+  );
+  tbody.prepend(row);
+}
+
+async function runSensorTest(button, testId) {
+  await action(button, async () => {
+    button.dataset.originalLabel ||= button.textContent;
+    button.textContent = "Running real sensor test…";
+    const result = await api(
+      `/api/sensor-tests/${encodeURIComponent(testId)}`,
+      {},
+    );
+    appendSensorTestResult(result);
+    toast(
+      result.passed
+        ? `${result.name} passed using stored real sensor evidence.`
+        : `${result.name} did not produce the expected evidence.`,
+    );
+  });
+  button.textContent = button.dataset.originalLabel || button.textContent;
+}
+
+function renderIntegritySimulation(data) {
+  const panel = $("demo-simulation-panel");
+  const target = $("lab-demo-results");
+  panel.hidden = false;
+  target.replaceChildren();
+
+  const intro = node("p", "fine-print");
+  intro.textContent =
+    data.description ||
+    "This demonstration uses temporary sample evidence and does not alter live evidence.";
+  target.append(intro);
+
+  for (const check of data.result?.checks || []) {
+    const row = node("div", "demo-row");
+    row.append(
+      node("span", "", check.scenario),
+      badge(
+        check.verified ? "Verification passed" : "Change detected",
+        check.verified ? "good" : "warn",
+      ),
+    );
+    target.append(row);
+  }
+}
+
+async function runIntegritySimulation(button) {
+  await action(button, async () => {
+    const data = await api("/api/simulations/integrity", {});
+    renderIntegritySimulation(data);
+    toast("Isolated evidence demonstration finished.");
+  });
+}
+
 async function loadDailyEvidence() {
   const data = await api("/api/evidence/daily");
   const tbody = $("daily-evidence-body");
@@ -1198,6 +1307,21 @@ $("proof-button").addEventListener("click", (event) =>
     "proof-result",
   ),
 );
+document.querySelectorAll("[data-sensor-test]").forEach((button) =>
+  button.addEventListener("click", () =>
+    runSensorTest(button, button.dataset.sensorTest),
+  ),
+);
+$("run-integrity-simulation").addEventListener("click", (event) =>
+  runIntegritySimulation(event.currentTarget),
+);
+$("clear-lab-results").addEventListener("click", () => {
+  $("lab-results-body").replaceChildren();
+  $("lab-results-empty").hidden = false;
+  $("demo-simulation-panel").hidden = true;
+  $("lab-demo-results").replaceChildren();
+});
+
 $("refresh-daily-evidence").addEventListener("click", (event) =>
   action(event.currentTarget, () => loadDailyEvidence()),
 );
