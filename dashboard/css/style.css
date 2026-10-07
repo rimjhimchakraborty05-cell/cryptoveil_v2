@@ -1368,3 +1368,93 @@ body[data-mode="simple"] .threat-metrics .metric small {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+
+/* Simulation Lab */
+.lab-warning {
+  margin-bottom: 24px;
+  padding: 16px 18px;
+  border: 1px solid #e2d6b9;
+  border-radius: 11px;
+  background: #fff8e8;
+  color: #72551e;
+}
+.lab-warning strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+.lab-warning p {
+  margin: 0;
+  color: inherit;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.lab-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+.lab-panel {
+  min-width: 0;
+}
+.lab-test-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+}
+.lab-test-card:first-of-type {
+  border-top: 0;
+}
+.lab-test-card > div {
+  min-width: 0;
+}
+.lab-test-card strong {
+  display: block;
+  font-size: 12px;
+}
+.lab-test-card p {
+  margin: 5px 0 0;
+  max-width: 520px;
+  font-size: 10px;
+  line-height: 1.6;
+}
+.lab-results-panel {
+  padding: 0;
+  overflow: hidden;
+}
+.lab-results-panel .panel-heading {
+  padding: 24px 25px 6px;
+}
+.demo-results-panel {
+  margin-top: 24px;
+}
+#lab-results-body td:nth-child(3),
+#lab-results-body td:nth-child(4) {
+  max-width: 230px;
+  overflow-wrap: anywhere;
+}
+#lab-results-body td:nth-child(5) {
+  white-space: nowrap;
+}
+@media (max-width: 900px) {
+  .lab-grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 600px) {
+  .sidebar nav {
+    grid-template-columns: repeat(6, 1fr);
+  }
+  .lab-test-card {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .lab-test-card .button {
+    width: 100%;
+  }
+}
