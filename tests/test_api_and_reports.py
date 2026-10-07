@@ -18,6 +18,7 @@ from agent.reports.export import safe_cell
 from agent.reports.scheduler import ReportScheduler
 from agent.reports.store import ReportStore
 from agent.server.main import Settings, create_app
+from agent.server.security import PairingManager
 
 EXTENSION = "chrome-extension://" + "a" * 32
 
@@ -210,6 +211,31 @@ def test_profile_email_requires_an_explicit_matching_source(client):
             ).status_code
             == 422
         )
+
+
+def test_paired_browser_token_survives_application_restart(tmp_path):
+    first = PairingManager(tmp_path)
+    code = first.new_code()["code"]
+    result = first.complete(code, "Edge profile", EXTENSION)
+    token = result["token"]
+    client_id = result["client_id"]
+
+    restarted = PairingManager(tmp_path)
+    client = restarted.authenticate(token, EXTENSION)
+
+    assert client is not None
+    assert client["id"] == client_id
+    assert client["name"] == "Edge profile"
+
+
+def test_persisted_pairing_stays_bound_to_original_extension_origin(tmp_path):
+    first = PairingManager(tmp_path)
+    code = first.new_code()["code"]
+    token = first.complete(code, "Chrome profile", EXTENSION)["token"]
+
+    restarted = PairingManager(tmp_path)
+    assert restarted.authenticate(token, EXTENSION) is not None
+    assert restarted.authenticate(token, "chrome-extension://" + "b" * 32) is None
 
 
 def test_pairing_code_is_one_use_and_limited(client):
