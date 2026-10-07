@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+import sys
 import time
 import uuid
 from typing import Literal
@@ -280,6 +282,51 @@ def events(
     return {
         "events": [event_view(e) for e in reversed(entries[-limit:])],
         "window": "Latest 500 stored events",
+    }
+
+
+@router.get("/api/runtime/readiness")
+def runtime_readiness(request: Request):
+    from .main import BASE_DIR
+
+    state = request.app.state
+    settings = state.settings
+    data_dir = settings.data_dir.resolve()
+    archive_dir = settings.archive_dir.resolve()
+    archive = state.audit_logger.archive.describe()
+
+    checks = {
+        "data_directory": data_dir.is_dir() and os.access(data_dir, os.W_OK),
+        "archive_directory": archive_dir.is_dir() and os.access(archive_dir, os.W_OK),
+        "rules_file": settings.rules_path.is_file(),
+        "dashboard_assets": (BASE_DIR / "dashboard" / "index.html").is_file(),
+        "extension_assets": (BASE_DIR / "extension" / "manifest.json").is_file(),
+        "evidence_integrity": bool(state.audit_logger.last_verification.get("verified")),
+    }
+    issues = [name for name, passed in checks.items() if not passed]
+
+    return {
+        "version": VERSION,
+        "packaged": bool(getattr(sys, "frozen", False)),
+        "loopback_only": True,
+        "healthy": not issues,
+        "checks": checks,
+        "issues": issues,
+        "paths": {
+            "data": str(data_dir),
+            "archive": str(archive_dir),
+            "rules": str(settings.rules_path.resolve()),
+        },
+        "archive": archive,
+        "sensors": [
+            {
+                "name": type(sensor).__name__,
+                "status": getattr(sensor, "status", "starting"),
+                "mode": getattr(sensor, "mode", None),
+                "detail": getattr(sensor, "last_error", None),
+            }
+            for sensor in state.sensors
+        ],
     }
 
 
