@@ -26,6 +26,9 @@
         <button class="nav-item" data-view="activity">
           <span aria-hidden="true">≋</span> Activity
         </button>
+        <button class="nav-item" data-view="threats">
+          <span aria-hidden="true">◎</span> Threats
+        </button>
         <button class="nav-item" data-view="evidence">
           <span aria-hidden="true">◇</span> Evidence
         </button>
@@ -303,6 +306,127 @@
             </p>
           </div>
         </section>
+        <section
+          class="view"
+          id="view-threats"
+          aria-labelledby="threats-title"
+          hidden
+        >
+          <div class="page-heading">
+            <div>
+              <span class="eyebrow">INVESTIGATE & TRACE</span>
+              <h1 id="threats-title">Threat investigation</h1>
+              <p>
+                Review suspicious behavior with process context, MITRE ATT&CK
+                mapping, and linked evidence.
+              </p>
+            </div>
+            <button class="button secondary" id="refresh-threats">
+              Refresh
+            </button>
+          </div>
+
+          <div class="metric-grid threat-metrics">
+            <article class="metric">
+              <span class="metric-label">Findings to review</span>
+              <strong id="threat-findings">—</strong>
+              <small>Within the latest 500 stored events</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">Critical findings</span>
+              <strong id="threat-critical">—</strong>
+              <small>Highest-priority investigation items</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">MITRE alerts</span>
+              <strong id="threat-mitre">—</strong>
+              <small>Process behavior matched to ATT&CK rules</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">Correlated findings</span>
+              <strong id="threat-correlated">—</strong>
+              <small>Related observations within the correlation window</small>
+            </article>
+          </div>
+
+          <div class="investigation-grid">
+            <article class="panel">
+              <div class="panel-heading">
+                <div>
+                  <span class="eyebrow">LIVE PROCESS RELATIONSHIPS</span>
+                  <h2>Flagged process paths</h2>
+                  <p>
+                    Active process lineage is shown only from real process
+                    observations.
+                  </p>
+                </div>
+                <span id="process-graph-count" class="badge neutral">Checking</span>
+              </div>
+              <div id="process-graph-wrap" class="process-graph-wrap">
+                <svg
+                  id="process-graph-svg"
+                  role="img"
+                  aria-label="Live suspicious process relationship graph"
+                  preserveAspectRatio="xMinYMin meet"
+                ></svg>
+                <p id="process-graph-empty" class="empty-state" hidden>
+                  No active suspicious process relationship is currently flagged.
+                </p>
+              </div>
+              <p class="fine-print analyst-only">
+                A highlighted process is an ATT&CK-aligned behavioral indicator.
+                It is not a malware verdict. Select a highlighted node to open
+                its stored evidence.
+              </p>
+            </article>
+
+            <article class="panel">
+              <div class="panel-heading">
+                <div>
+                  <span class="eyebrow">MITRE ATT&CK CONTEXT</span>
+                  <h2>Techniques observed</h2>
+                </div>
+              </div>
+              <div id="mitre-technique-list" class="technique-list"></div>
+              <p id="mitre-technique-empty" class="empty-state" hidden>
+                No MITRE ATT&CK-aligned process alert appears in the current
+                investigation window.
+              </p>
+            </article>
+          </div>
+
+          <article class="panel findings-panel">
+            <div class="panel-heading">
+              <div>
+                <span class="eyebrow">RECENT INVESTIGATION ITEMS</span>
+                <h2>What needs review</h2>
+                <p>
+                  Open an item to see what happened, why CryptoVeil noticed it,
+                  and the recommended next step.
+                </p>
+              </div>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Time</th>
+                    <th scope="col">Finding</th>
+                    <th scope="col">Level</th>
+                    <th scope="col">Context</th>
+                    <th scope="col">Evidence</th>
+                  </tr>
+                </thead>
+                <tbody id="threat-findings-body"></tbody>
+              </table>
+            </div>
+            <p id="threat-findings-empty" class="empty-state" hidden>
+              No investigation findings are present in the latest evidence
+              window.
+            </p>
+          </article>
+        </section>
+
         <section
           class="view"
           id="view-evidence"
