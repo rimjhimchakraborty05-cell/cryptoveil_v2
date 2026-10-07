@@ -48,7 +48,7 @@
       <div class="sidebar-bottom">
         <span class="connection-dot" id="app-dot"></span
         ><span id="app-status" role="status">Connecting to app…</span
-        ><small>CryptoVeil 2.1</small>
+        ><small>CryptoVeil 2.2</small>
       </div>
     </aside>
     <div class="workspace">
@@ -90,6 +90,50 @@
             <strong>Getting ready</strong>
             <p>Waiting for the application to report its status.</p>
           </div>
+
+          <article id="first-run-card" class="panel first-run-card">
+            <div class="panel-heading">
+              <div>
+                <span class="eyebrow">QUICK SETUP</span>
+                <h2>Get protected in three steps</h2>
+                <p>
+                  CryptoVeil keeps the setup short. Each step turns complete
+                  automatically when the real application state is ready.
+                </p>
+              </div>
+              <span id="first-run-progress" class="badge neutral">Checking</span>
+            </div>
+            <div class="setup-steps">
+              <div class="setup-step">
+                <span id="setup-app-icon" class="setup-step-icon">1</span>
+                <div>
+                  <strong>Application ready</strong>
+                  <small id="setup-app-text">Checking local protection services…</small>
+                </div>
+              </div>
+              <div class="setup-step">
+                <span id="setup-browser-icon" class="setup-step-icon">2</span>
+                <div>
+                  <strong>Connect your browser</strong>
+                  <small id="setup-browser-text">Pair the CryptoVeil extension once.</small>
+                </div>
+                <button class="button secondary compact" id="setup-connect-browser">
+                  Connect
+                </button>
+              </div>
+              <div class="setup-step">
+                <span id="setup-monitoring-icon" class="setup-step-icon">3</span>
+                <div>
+                  <strong>Confirm monitoring</strong>
+                  <small id="setup-monitoring-text">Checking endpoint sensors and evidence integrity…</small>
+                </div>
+                <button class="button secondary compact" id="setup-open-lab">
+                  Safe test
+                </button>
+              </div>
+            </div>
+          </article>
+
           <section class="protection-grid" aria-label="Protection status">
             <article class="protection-item">
               <span class="protection-icon" aria-hidden="true">B</span>
