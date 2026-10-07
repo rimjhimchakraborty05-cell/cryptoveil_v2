@@ -378,6 +378,22 @@ def test_date_wise_evidence_api_lists_verifies_and_downloads(client):
     assert evidence_json.status_code == 200
     assert evidence_json.headers["content-type"].startswith("application/json")
 
+    events = client.get(f"/api/evidence/daily/{date}/download?format=events")
+    assert events.status_code == 200
+    assert events.headers["content-type"].startswith("application/x-ndjson")
+    assert b'"seq":0' in events.content
+
+    metadata = client.get(f"/api/evidence/daily/{date}/download?format=metadata")
+    assert metadata.status_code == 200
+    metadata_body = metadata.json()
+    assert metadata_body["verification"]["verified"] is True
+    assert metadata_body["daily_seal"]["kind"] == "daily_evidence_seal"
+    assert metadata_body["manifest"]["kind"] == "daily_evidence_bundle"
+
+    pdf = client.get(f"/api/evidence/daily/{date}/download?format=pdf")
+    assert pdf.status_code == 200
+    assert pdf.content.startswith(b"%PDF")
+
 
 def test_daily_seals_link_consecutive_days_and_fail_closed_on_tamper(client):
     pair(client)
