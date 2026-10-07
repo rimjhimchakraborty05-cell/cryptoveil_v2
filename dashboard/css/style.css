@@ -1053,3 +1053,26 @@ pre {
     }
   }
 }
+
+
+/* Date-wise evidence controls */
+.daily-evidence-panel {
+  margin-top: 24px;
+}
+.archive-trust-note {
+  margin: -2px 0 16px;
+  padding: 11px 13px;
+  border: 1px solid #d9d0e4;
+  border-radius: 9px;
+  background: #f3eef8;
+  color: #5f526b;
+  font-size: 11px;
+  line-height: 1.55;
+}
+.action-separator {
+  color: var(--muted);
+  padding: 0 5px;
+}
+.daily-evidence-panel td:last-child {
+  white-space: nowrap;
+}
