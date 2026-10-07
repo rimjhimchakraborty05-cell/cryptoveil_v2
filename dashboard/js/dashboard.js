@@ -1097,19 +1097,41 @@ async function loadDailyEvidence() {
       }),
     );
 
-    const jsonButton = node("button", "text-button", "JSON ↓");
-    jsonButton.disabled = !day.verified;
-    jsonButton.addEventListener("click", () =>
-      action(jsonButton, () => downloadDailyEvidence(day.date, "json")),
+    const eventsButton = node("button", "text-button", "JSON Events ↓");
+    eventsButton.disabled = !day.verified;
+    eventsButton.addEventListener("click", () =>
+      action(eventsButton, () => downloadDailyEvidence(day.date, "events")),
     );
 
-    const zipButton = node("button", "text-button", "Evidence ZIP ↓");
+    const pdfButton = node("button", "text-button", "PDF Report ↓");
+    pdfButton.disabled = !day.verified;
+    pdfButton.addEventListener("click", () =>
+      action(pdfButton, () => downloadDailyEvidence(day.date, "pdf")),
+    );
+
+    const metadataButton = node("button", "text-button", "Hash & Metadata ↓");
+    metadataButton.disabled = !day.verified;
+    metadataButton.addEventListener("click", () =>
+      action(metadataButton, () => downloadDailyEvidence(day.date, "metadata")),
+    );
+
+    const zipButton = node("button", "text-button", "All Evidence ZIP ↓");
     zipButton.disabled = !day.verified;
     zipButton.addEventListener("click", () =>
       action(zipButton, () => downloadDailyEvidence(day.date, "zip")),
     );
 
-    actions.append(verifyButton, node("span", "action-separator", "·"), jsonButton, node("span", "action-separator", "·"), zipButton);
+    actions.append(
+      verifyButton,
+      node("span", "action-separator", "·"),
+      eventsButton,
+      node("span", "action-separator", "·"),
+      pdfButton,
+      node("span", "action-separator", "·"),
+      metadataButton,
+      node("span", "action-separator", "·"),
+      zipButton,
+    );
 
     row.append(
       date,
@@ -1137,10 +1159,14 @@ async function downloadDailyEvidence(date, format) {
   const url = URL.createObjectURL(await res.blob());
   const a = node("a");
   a.href = url;
-  a.download =
-    format === "zip"
-      ? `cryptoveil_evidence_${date}.zip`
-      : `cryptoveil_${date}.json`;
+  const names = {
+    zip: `cryptoveil_evidence_${date}.zip`,
+    events: `cryptoveil_events_${date}.jsonl`,
+    pdf: `cryptoveil_${date}.pdf`,
+    metadata: `cryptoveil_evidence_metadata_${date}.json`,
+    json: `cryptoveil_${date}.json`,
+  };
+  a.download = names[format] || `cryptoveil_${date}.${format}`;
   document.body.append(a);
   a.click();
   a.remove();
