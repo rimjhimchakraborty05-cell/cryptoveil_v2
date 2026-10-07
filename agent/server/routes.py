@@ -16,6 +16,7 @@ from ..bus.events import BrowserTelemetryEvent, EventSeverity
 from ..forensics.audit_logger import AuditLogger, IntegrityError
 from ..reports.report_generator import describe_event, next_step
 from ..reports.store import valid_date
+from .sensor_tests import SensorTestUnavailable
 
 router = APIRouter()
 
@@ -387,6 +388,36 @@ def integrity_demo():
     from ..forensics.demo import demonstrate_integrity
 
     return demonstrate_integrity()
+
+
+@router.post("/api/sensor-tests/{test_id}")
+async def run_sensor_test(
+    test_id: Literal["process_start", "ransomware_indicator"],
+    request: Request,
+):
+    try:
+        result = await request.app.state.sensor_tests.run(test_id)
+    except SensorTestUnavailable as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    request.app.state.live.notify()
+    return result
+
+
+@router.post("/api/simulations/integrity")
+def isolated_integrity_simulation():
+    from ..forensics.demo import demonstrate_integrity
+
+    return {
+        "mode": "isolated_demo",
+        "name": "Evidence tamper demonstration",
+        "safe": True,
+        "description": (
+            "Uses temporary sample evidence only. Live CryptoVeil evidence is not changed."
+        ),
+        "result": demonstrate_integrity(),
+    }
 
 
 @router.get("/api/process/graph")
