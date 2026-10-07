@@ -372,6 +372,7 @@ def test_date_wise_evidence_api_lists_verifies_and_downloads(client):
         assert "checkpoints.json" in bundle.namelist()
         assert "manifest.json" in bundle.namelist()
         assert "daily_seal.json" in bundle.namelist()
+        assert "daily_summary.json" in bundle.namelist()
 
     evidence_json = client.get(f"/api/evidence/daily/{date}/download?format=json")
     assert evidence_json.status_code == 200
@@ -449,6 +450,7 @@ def test_report_exports_are_saved_signed_and_tamper_checked(client):
                     "evidence.jsonl",
                     "checkpoints.json",
                     "daily_seal.json",
+                    "daily_summary.json",
                 }
                 manifest = json.loads(bundle.read("manifest.json"))
                 assert client.app.state.audit_logger.verify_signature(
