@@ -39,6 +39,7 @@ jobs:
           node --check extension/signals.js
           node --check extension/popup.js
           node --check dashboard/js/dashboard.js
+          node --check tests/extension_live_integration.mjs
       - name: Test extension delivery
         run: node --test tests/extension.test.mjs
 
