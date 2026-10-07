@@ -29,6 +29,7 @@ from ..reports.store import ReportStore
 from ..sensors.clipboard_watcher import ClipboardWatcher
 from ..sensors.entropy_watcher import EntropyWatcher
 from ..sensors.process_watcher import ProcessWatcher
+from ..version import VERSION
 from . import routes
 from .live import LiveUpdates
 from .security import PairingManager, access_guard
@@ -203,7 +204,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     application = FastAPI(
         title="CryptoVeil",
-        version="2.2.0",
+        version=VERSION,
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,
