@@ -32,6 +32,7 @@ from ..sensors.process_watcher import ProcessWatcher
 from . import routes
 from .live import LiveUpdates
 from .security import PairingManager, access_guard
+from .sensor_tests import SensorTestRunner
 
 log = logging.getLogger("cryptoveil.server")
 BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
@@ -158,6 +159,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         sensor.status = "unavailable"
                         sensor.last_error = str(exc)
                         log.exception("Sensor failed to start")
+
+            application.state.sensor_tests = SensorTestRunner(
+                audit, sensors, settings.watch_paths
+            )
 
             async def monitor():
                 while True:
