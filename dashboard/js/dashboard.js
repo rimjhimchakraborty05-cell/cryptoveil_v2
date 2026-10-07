@@ -130,6 +130,8 @@ function applyMode(mode) {
   $("mode-analyst").classList.toggle("active", !simple);
   $("mode-analyst").setAttribute("aria-pressed", String(!simple));
   if (state.investigation) renderInvestigation(state.investigation);
+  if (!simple && state.csrf && state.view === "overview")
+    loadRuntimeReadiness().catch(showError);
 }
 function sensorByName(data, name) {
   return data.sensors.find((sensor) => sensor.name === name);
@@ -224,6 +226,8 @@ function selectView(view) {
   });
   $("breadcrumb").textContent = `Workspace / ${titles[view]}`;
   history.replaceState(null, "", `#${view}`);
+  if (view === "overview" && state.mode === "analyst")
+    loadRuntimeReadiness().catch(showError);
   if (view === "activity") loadActivity().catch(showError);
   if (view === "threats") loadInvestigation().catch(showError);
   if (view === "evidence") loadDailyEvidence().catch(showError);
@@ -546,6 +550,38 @@ function renderClients(clients) {
 async function refreshStatus() {
   renderStatus(await api("/api/status"));
 }
+function renderRuntimeReadiness(data) {
+  const labels = {
+    data_directory: "Persistent data directory",
+    archive_directory: "Evidence archive directory",
+    rules_file: "MITRE rule file",
+    dashboard_assets: "Dashboard assets",
+    extension_assets: "Browser extension assets",
+    evidence_integrity: "Evidence integrity",
+  };
+  const target = $("runtime-checks");
+  target.replaceChildren();
+
+  for (const [key, passed] of Object.entries(data.checks || {})) {
+    const row = node("div", "runtime-check");
+    row.append(
+      node("span", "", labels[key] || key.replaceAll("_", " ")),
+      badge(passed ? "Ready" : "Needs attention", passed ? "good" : "bad"),
+    );
+    target.append(row);
+  }
+
+  const sensorSummary = (data.sensors || [])
+    .map((sensor) => `${sensor.name}: ${sensor.status}`)
+    .join(" · ");
+  $("runtime-path-note").textContent =
+    `${data.packaged ? "Packaged Windows runtime" : "Development runtime"} · loopback-only service · data: ${data.paths?.data || "unknown"}${sensorSummary ? ` · ${sensorSummary}` : ""}`;
+}
+
+async function loadRuntimeReadiness() {
+  renderRuntimeReadiness(await api("/api/runtime/readiness"));
+}
+
 async function loadActivity() {
   const data = await api("/api/events?limit=500");
   state.events = data.events;
@@ -1273,6 +1309,9 @@ $("verify-button").addEventListener("click", (event) =>
     await refreshStatus();
     toast("Evidence verification finished.");
   }),
+);
+$("refresh-runtime").addEventListener("click", (event) =>
+  action(event.currentTarget, loadRuntimeReadiness),
 );
 $("refresh-activity").addEventListener("click", (event) =>
   action(event.currentTarget, loadActivity),
