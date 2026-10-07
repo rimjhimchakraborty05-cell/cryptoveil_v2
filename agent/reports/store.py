@@ -276,6 +276,14 @@ class ReportStore:
     def list_reports(self) -> list[dict]:
         return [self.verify(date) for date in self.dates()]
 
+    def verify_all_dates(self) -> dict:
+        results = [self.verify(date) for date in sorted(self.dates())]
+        return {
+            "verified": all(result["verified"] for result in results),
+            "dates_checked": len(results),
+            "results": results,
+        }
+
     def download(self, date: str, fmt: str) -> tuple[bytes, str, str]:
         with self._lock:
             result, files = self._verify_snapshot(date)
