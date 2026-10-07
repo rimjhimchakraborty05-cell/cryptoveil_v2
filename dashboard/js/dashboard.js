@@ -1046,12 +1046,30 @@ async function loadDailyEvidence() {
     );
 
     const bundle = node("td");
+    const sealKnown = day.daily_seal_verified !== null && day.daily_seal_verified !== undefined;
+    const sealOk = sealKnown ? day.daily_seal_verified && day.daily_link_verified : day.signature_verified;
     bundle.append(
       badge(
-        day.signature_verified ? "Signed" : "Signature issue",
-        day.signature_verified ? "good" : "bad",
+        sealKnown
+          ? sealOk
+            ? "Daily seal verified"
+            : "Daily seal issue"
+          : day.signature_verified
+            ? "Signed legacy bundle"
+            : "Signature issue",
+        sealOk ? "good" : day.signature_verified ? "neutral" : "bad",
       ),
     );
+    if (sealKnown)
+      bundle.append(
+        node(
+          "small",
+          "",
+          day.daily_link_verified
+            ? "Linked to the previous sealed day"
+            : "Previous-day link needs review",
+        ),
+      );
 
     const integrity = node("td");
     integrity.append(
@@ -1361,6 +1379,17 @@ $("clear-lab-results").addEventListener("click", () => {
   $("lab-demo-results").replaceChildren();
 });
 
+$("verify-all-daily-evidence").addEventListener("click", (event) =>
+  action(event.currentTarget, async () => {
+    const result = await api("/api/evidence/daily/verify-all");
+    toast(
+      result.verified
+        ? `All ${result.dates_checked} date-wise evidence bundles verified.`
+        : "One or more date-wise evidence bundles need review.",
+    );
+    await loadDailyEvidence();
+  }),
+);
 $("refresh-daily-evidence").addEventListener("click", (event) =>
   action(event.currentTarget, () => loadDailyEvidence()),
 );
