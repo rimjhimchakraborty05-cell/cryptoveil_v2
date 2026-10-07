@@ -549,6 +549,11 @@ def daily_evidence(request: Request):
     }
 
 
+@router.get("/api/evidence/daily/verify-all")
+def verify_all_daily_evidence(request: Request):
+    return request.app.state.report_store.verify_all_dates()
+
+
 @router.get("/api/evidence/daily/{date}/verify")
 def verify_daily_evidence(date: str, request: Request):
     try:
