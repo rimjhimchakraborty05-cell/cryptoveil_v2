@@ -187,6 +187,24 @@
             </div>
           </article>
 
+          <article class="panel runtime-panel analyst-only">
+            <div class="panel-heading">
+              <div>
+                <span class="eyebrow">RUNTIME READINESS</span>
+                <h2>Application environment</h2>
+                <p>
+                  Confirms that the packaged application can access its rules,
+                  persistent storage, dashboard assets, and evidence archive.
+                </p>
+              </div>
+              <button class="text-button" id="refresh-runtime">
+                Run checks
+              </button>
+            </div>
+            <div id="runtime-checks" class="runtime-checks"></div>
+            <p id="runtime-path-note" class="fine-print"></p>
+          </article>
+
           <div class="metric-grid">
             <article class="metric">
               <span class="metric-label">Evidence records</span
