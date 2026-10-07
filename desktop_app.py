@@ -14,6 +14,8 @@ import webbrowser
 
 import uvicorn
 
+from agent.version import VERSION
+
 log = logging.getLogger("cryptoveil.desktop")
 
 
@@ -24,7 +26,7 @@ def is_server_healthy(port: int) -> bool:
             return (
                 isinstance(data, dict)
                 and data.get("service") == "cryptoveil-agent"
-                and data.get("version") == "2.1.0"
+                and data.get("version") == VERSION
             )
     except (OSError, ValueError):
         return False
@@ -71,6 +73,23 @@ def main() -> None:
                 )
             time.sleep(0.15)
     app_url = f"http://127.0.0.1:{port}/dashboard/"
+
+    # Packaged smoke mode validates that the frozen application can start its
+    # loopback backend and static dashboard without opening a desktop window.
+    # It is used only when explicitly enabled by the build pipeline.
+    smoke_seconds = float(os.environ.get("CRYPTOVEIL_SMOKE_SECONDS", "0") or 0)
+    if smoke_seconds > 0:
+        try:
+            time.sleep(min(smoke_seconds, 30.0))
+            if not is_server_healthy(port):
+                raise RuntimeError("CryptoVeil packaged smoke check lost backend health")
+            return
+        finally:
+            if server:
+                server.should_exit = True
+                if thread:
+                    thread.join()
+
     try:
         try:
             import webview
