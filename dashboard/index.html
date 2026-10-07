@@ -595,26 +595,37 @@
           ×
         </button>
       </div>
-      <p id="event-summary"></p>
-      <div class="banner neutral">
-        <strong>Suggested next step</strong>
-        <p id="event-action"></p>
-        <div id="related-evidence" hidden></div>
+      <div class="event-explanation-grid">
+        <section class="event-explanation">
+          <span class="eyebrow">WHAT HAPPENED</span>
+          <p id="event-summary"></p>
+        </section>
+        <section class="event-explanation">
+          <span class="eyebrow">WHY CRYPTOVEIL NOTICED IT</span>
+          <p id="event-reason"></p>
+        </section>
+        <section class="event-explanation">
+          <span class="eyebrow">WHAT YOU SHOULD DO</span>
+          <p id="event-action"></p>
+        </section>
       </div>
+      <div id="related-evidence" class="related-evidence" hidden></div>
       <dl class="detail-list">
         <dt>Recorded at</dt>
         <dd id="event-time"></dd>
-        <dt>Original record hash</dt>
-        <dd><code id="event-hash"></code></dd>
+        <dt class="analyst-only">Original record hash</dt>
+        <dd class="analyst-only"><code id="event-hash"></code></dd>
       </dl>
-      <button class="button secondary" id="proof-button">
-        Verify this record’s inclusion proof
-      </button>
-      <p id="proof-result" role="status"></p>
-      <details>
-        <summary>Technical event details</summary>
-        <pre id="event-json"></pre>
-      </details>
+      <div class="analyst-only">
+        <button class="button secondary" id="proof-button">
+          Verify this record’s inclusion proof
+        </button>
+        <p id="proof-result" role="status"></p>
+        <details>
+          <summary>Technical event details</summary>
+          <pre id="event-json"></pre>
+        </details>
+      </div>
     </dialog>
     <div id="toast" class="toast" role="status" hidden></div>
   </body>
