@@ -35,6 +35,9 @@
         <button class="nav-item" data-view="reports">
           <span aria-hidden="true">▤</span> Daily reports
         </button>
+        <button class="nav-item" data-view="lab">
+          <span aria-hidden="true">△</span> Simulation Lab
+        </button>
       </nav>
       <div class="sidebar-note">
         <span class="eyebrow">BUILT AROUND YOUR EVIDENCE</span>
@@ -653,6 +656,143 @@
             the original evidence, checkpoints and file hashes. A report is
             checked again before every download.
           </p>
+        </section>
+
+        <section
+          class="view"
+          id="view-lab"
+          aria-labelledby="lab-title"
+          hidden
+        >
+          <div class="page-heading">
+            <div>
+              <span class="eyebrow">VALIDATE WITHOUT CONFUSION</span>
+              <h1 id="lab-title">Simulation Lab</h1>
+              <p>
+                Real sensor tests create harmless operating-system activity.
+                Demo simulations stay isolated and never pretend to be live detections.
+              </p>
+            </div>
+            <span class="badge neutral">Safe validation</span>
+          </div>
+
+          <div class="lab-warning">
+            <strong>Know what you are running.</strong>
+            <p>
+              Real Sensor Tests use the actual CryptoVeil sensors and evidence pipeline.
+              Demo Simulations use temporary sample data only. Neither section executes
+              malware or destructive commands.
+            </p>
+          </div>
+
+          <div class="lab-grid">
+            <article class="panel lab-panel">
+              <div class="panel-heading">
+                <div>
+                  <span class="eyebrow">REAL SENSOR TESTS</span>
+                  <h2>Validate the actual monitoring pipeline</h2>
+                  <p>
+                    The test passes only if real sensor evidence is stored by CryptoVeil.
+                  </p>
+                </div>
+                <span class="badge good">Real activity</span>
+              </div>
+
+              <div class="lab-test-card">
+                <div>
+                  <strong>Process Start Detection</strong>
+                  <p>
+                    Starts a harmless short-lived Python process and waits for the
+                    real ProcessWatcher to store the process-start evidence.
+                  </p>
+                </div>
+                <button class="button primary" data-sensor-test="process_start">
+                  Run process test
+                </button>
+              </div>
+
+              <div class="lab-test-card">
+                <div>
+                  <strong>Ransomware Behavioral Indicator</strong>
+                  <p>
+                    Creates temporary high-entropy test files in a configured watched
+                    folder and waits for the real burst-entropy sensor. Test files are
+                    removed automatically afterward.
+                  </p>
+                </div>
+                <button class="button primary" data-sensor-test="ransomware_indicator">
+                  Run file sensor test
+                </button>
+              </div>
+            </article>
+
+            <article class="panel lab-panel">
+              <div class="panel-heading">
+                <div>
+                  <span class="eyebrow">DEMO SIMULATIONS</span>
+                  <h2>Demonstrate forensic behavior safely</h2>
+                  <p>
+                    These demonstrations use temporary data and are clearly separate
+                    from live sensor detections.
+                  </p>
+                </div>
+                <span class="badge neutral">Isolated</span>
+              </div>
+
+              <div class="lab-test-card">
+                <div>
+                  <strong>Evidence Tamper Demonstration</strong>
+                  <p>
+                    Builds temporary sample evidence, modifies or removes copies, and
+                    demonstrates how verification detects each change.
+                  </p>
+                </div>
+                <button class="button secondary" id="run-integrity-simulation">
+                  Run isolated demo
+                </button>
+              </div>
+            </article>
+          </div>
+
+          <article class="panel lab-results-panel">
+            <div class="panel-heading">
+              <div>
+                <span class="eyebrow">VALIDATION RESULTS</span>
+                <h2>Expected versus actual detection</h2>
+              </div>
+              <button class="text-button" id="clear-lab-results">Clear results</button>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Test</th>
+                    <th scope="col">Type</th>
+                    <th scope="col">Expected</th>
+                    <th scope="col">Actual</th>
+                    <th scope="col">Latency</th>
+                    <th scope="col">Evidence</th>
+                    <th scope="col">Result</th>
+                  </tr>
+                </thead>
+                <tbody id="lab-results-body"></tbody>
+              </table>
+            </div>
+            <p id="lab-results-empty" class="empty-state">
+              Run a validation above to see the measured result.
+            </p>
+          </article>
+
+          <article class="panel demo-results-panel" id="demo-simulation-panel" hidden>
+            <div class="panel-heading">
+              <div>
+                <span class="eyebrow">ISOLATED DEMO OUTPUT</span>
+                <h2>Evidence tamper verification</h2>
+              </div>
+              <span class="badge neutral">Temporary sample data</span>
+            </div>
+            <div id="lab-demo-results"></div>
+          </article>
         </section>
       </main>
       <footer>
