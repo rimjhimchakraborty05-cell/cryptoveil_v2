@@ -52,6 +52,9 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Install desktop build dependencies
         run: python -m pip install -r requirements.txt "pyinstaller>=6,<7"
       - name: Build Windows application
@@ -100,6 +103,15 @@ jobs:
             throw "Packaged runtime is not using the configured persistent data directory"
           }
 
+          # Exercise the actual extension service-worker code against the
+          # packaged backend. Pairing and the first event must receive a
+          # durable storage receipt before the extension queue is cleared.
+          $extensionState = Join-Path $env:RUNNER_TEMP "cryptoveil-extension-state.json"
+          node tests/extension_live_integration.mjs pair $extensionState
+          if ($LASTEXITCODE -ne 0) {
+            throw "Extension-to-packaged-app pairing integration failed"
+          }
+
           Wait-Process -Id $process.Id -Timeout 30
           $process.Refresh()
           if ($process.ExitCode -ne 0) {
@@ -109,9 +121,16 @@ jobs:
             throw "Packaged CryptoVeil did not initialize its persistent runtime directory"
           }
 
+          # With the app offline, the same real extension worker must retain
+          # its event and pairing token rather than discarding evidence.
+          node tests/extension_live_integration.mjs offline $extensionState
+          if ($LASTEXITCODE -ne 0) {
+            throw "Extension offline queue persistence failed"
+          }
+
           # Restart using the same persistent directories to catch startup,
-          # locking, stale-session, and runtime-path regressions.
-          $env:CRYPTOVEIL_SMOKE_SECONDS = "5"
+          # locking, stale-session, pairing-token, and queue-recovery regressions.
+          $env:CRYPTOVEIL_SMOKE_SECONDS = "12"
           $restart = Start-Process -FilePath $exe -PassThru
           $restartHealthy = $false
           for ($i = 0; $i -lt 60; $i++) {
@@ -128,7 +147,17 @@ jobs:
             Stop-Process -Id $restart.Id -Force -ErrorAction SilentlyContinue
             throw "Packaged CryptoVeil failed to restart using existing runtime data"
           }
-          Wait-Process -Id $restart.Id -Timeout 20
+
+          # The extension worker reloads from its persisted state. Its queued
+          # event must now be acknowledged by the restarted packaged app and
+          # appear in the forensic event store.
+          node tests/extension_live_integration.mjs recover $extensionState
+          if ($LASTEXITCODE -ne 0) {
+            Stop-Process -Id $restart.Id -Force -ErrorAction SilentlyContinue
+            throw "Extension queue recovery after packaged-app restart failed"
+          }
+
+          Wait-Process -Id $restart.Id -Timeout 25
           $restart.Refresh()
           if ($restart.ExitCode -ne 0) {
             throw "Restarted packaged CryptoVeil exited with code $($restart.ExitCode)"
