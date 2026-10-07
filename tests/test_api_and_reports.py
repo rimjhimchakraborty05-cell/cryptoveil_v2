@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agent.bus.event_bus import EventBroker
-from agent.bus.events import BaseEvent
+from agent.bus.events import BaseEvent, MitreAlertEvent
 from agent.forensics.audit_logger import AuditLogger, IntegrityError
 from agent.forensics.evidence_archive import EvidenceArchive
 from agent.reports.export import safe_cell
@@ -95,6 +95,36 @@ def test_auth_origin_and_csrf_boundaries(client):
         == 200
     )
     assert client.post("/api/pairing/complete", json={"code": "00000000"}).status_code == 403
+
+
+def test_investigation_api_returns_real_findings_and_mitre_summary(client):
+    dashboard(client)
+    alert = MitreAlertEvent(
+        mitre_id="T1059",
+        mitre_name="Command and Scripting Interpreter",
+        description="Office launched a shell",
+        pid=77,
+        process_name="powershell.exe",
+        parent_name="winword.exe",
+        cmdline="powershell.exe -NoProfile",
+        rule_id="office-shell",
+    )
+    client.app.state.audit_logger.record(alert.model_dump(mode="json"))
+
+    response = client.get("/api/investigation")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["summary"]["findings"] == 1
+    assert data["summary"]["mitre_alerts"] == 1
+    assert data["mitre_techniques"] == [
+        {
+            "id": "T1059",
+            "name": "Command and Scripting Interpreter",
+            "count": 1,
+        }
+    ]
+    assert data["recent_findings"][0]["event"]["rule_id"] == "office-shell"
+    assert "process_graph" in data
 
 
 def test_browser_account_context_is_saved_per_event_and_survives_identity_changes(client):
