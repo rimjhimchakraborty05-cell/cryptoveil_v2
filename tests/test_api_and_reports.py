@@ -267,6 +267,36 @@ def test_tamper_detected_and_new_ingest_is_not_acknowledged(client):
     assert client.get("/api/forensics/proof/0").status_code == 409
 
 
+def test_date_wise_evidence_api_lists_verifies_and_downloads(client):
+    headers = pair(client)
+    client.post("/api/browser/telemetry", json=telemetry(), headers=headers)
+    generated = client.post("/api/reports/generate", json={})
+    assert generated.status_code == 200
+    date = generated.json()["date"]
+
+    listed = client.get("/api/evidence/daily")
+    assert listed.status_code == 200
+    payload = listed.json()
+    assert payload["days"] and payload["days"][0]["date"] == date
+    assert "host_separation_verified" in payload["archive"]
+
+    verified = client.get(f"/api/evidence/daily/{date}/verify")
+    assert verified.status_code == 200
+    assert verified.json()["verified"]
+
+    evidence_zip = client.get(f"/api/evidence/daily/{date}/download?format=zip")
+    assert evidence_zip.status_code == 200
+    assert evidence_zip.headers["content-type"].startswith("application/zip")
+    with zipfile.ZipFile(io.BytesIO(evidence_zip.content)) as bundle:
+        assert "evidence.jsonl" in bundle.namelist()
+        assert "checkpoints.json" in bundle.namelist()
+        assert "manifest.json" in bundle.namelist()
+
+    evidence_json = client.get(f"/api/evidence/daily/{date}/download?format=json")
+    assert evidence_json.status_code == 200
+    assert evidence_json.headers["content-type"].startswith("application/json")
+
+
 def test_report_exports_are_saved_signed_and_tamper_checked(client):
     headers = pair(client)
     client.post("/api/browser/telemetry", json=telemetry(), headers=headers)
