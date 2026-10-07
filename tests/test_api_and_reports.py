@@ -127,6 +127,23 @@ def test_investigation_api_returns_real_findings_and_mitre_summary(client):
     assert "process_graph" in data
 
 
+def test_runtime_readiness_reports_persistent_assets_without_exposing_secrets(client):
+    dashboard(client)
+    response = client.get("/api/runtime/readiness")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["version"]
+    assert data["loopback_only"] is True
+    assert data["checks"]["data_directory"] is True
+    assert data["checks"]["archive_directory"] is True
+    assert data["checks"]["rules_file"] is True
+    assert data["checks"]["dashboard_assets"] is True
+    assert data["checks"]["extension_assets"] is True
+    assert "csrf_token" not in data
+    assert "session_token" not in data
+    assert "private_key" not in data
+
+
 def test_browser_account_context_is_saved_per_event_and_survives_identity_changes(client):
     headers = pair(client)
     profile = {
