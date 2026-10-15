@@ -44,7 +44,7 @@ async function currentPageStatus() {
     sensitive_fields_detected: Number.isInteger(page?.sensitive_fields_detected)
       ? page.sensitive_fields_detected
       : null,
-    shadow_ai_monitoring: true,
+    shadow_ai_monitoring: page?.shadow_ai_monitoring === true ? true : null,
   };
 }
 
@@ -119,8 +119,8 @@ async function refresh() {
 
   setState(
     "shadow-status",
-    page.shadow_ai_monitoring ? "Active" : "Inactive",
-    page.shadow_ai_monitoring ? "good" : "neutral",
+    page.shadow_ai_monitoring === true ? "Active" : "Page not checked",
+    page.shadow_ai_monitoring === true ? "good" : "neutral",
   );
 }
 
