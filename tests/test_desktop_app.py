@@ -50,3 +50,18 @@ def test_frozen_runtime_uses_localappdata_for_persistent_data(monkeypatch, tmp_p
     expected = localappdata / "CryptoVeil" / "data"
     assert server_main.default_data_dir() == expected
     assert "_MEIPASS" not in str(server_main.default_data_dir())
+
+
+def test_startup_failure_message_preserves_evidence_instructions(tmp_path):
+    message = desktop_app.startup_error_message(
+        RuntimeError("Port 8765 is already in use"), tmp_path / "data"
+    )
+    assert "Port 8765 is already in use" in message
+    assert "desktop_app.log" in message
+    assert "not automatically reset" in message
+
+
+def test_startup_failure_fallback_is_safe_without_data_path():
+    message = desktop_app.startup_error_message(ValueError("Invalid configuration"))
+    assert "Invalid configuration" in message
+    assert "Diagnostic log" not in message
