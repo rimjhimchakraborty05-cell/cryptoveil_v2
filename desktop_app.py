@@ -11,12 +11,41 @@ import threading
 import time
 import urllib.request
 import webbrowser
+from pathlib import Path
 
 import uvicorn
 
 from agent.version import VERSION
 
 log = logging.getLogger("cryptoveil.desktop")
+
+
+def startup_error_message(exc: Exception, data_dir: str | os.PathLike[str] | None = None) -> str:
+    """Plain-language failure report; never touch existing evidence on startup failure."""
+    detail = str(exc).strip() or exc.__class__.__name__
+    lines = ["CryptoVeil could not start.", "", detail]
+    if data_dir:
+        lines.extend(
+            [
+                "",
+                f"Diagnostic log: {Path(data_dir) / 'desktop_app.log'}",
+                "Existing security evidence was not automatically reset or repaired.",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def show_startup_error(message: str) -> None:
+    log.error("%s", message.replace("\n", " | "))
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            ctypes.windll.user32.MessageBoxW(0, message, "CryptoVeil startup problem", 0x10)
+            return
+        except Exception:
+            log.exception("Could not display Windows startup dialog")
+    print(message)
 
 
 def is_server_healthy(port: int) -> bool:
@@ -128,4 +157,14 @@ def main() -> None:
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
-    main()
+    try:
+        main()
+    except Exception as exc:
+        try:
+            from agent.server.main import default_data_dir
+
+            error_dir = os.environ.get("CRYPTOVEIL_DATA_DIR", str(default_data_dir()))
+        except Exception:
+            error_dir = None
+        show_startup_error(startup_error_message(exc, error_dir))
+        raise SystemExit(1) from exc
