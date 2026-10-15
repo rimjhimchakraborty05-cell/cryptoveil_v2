@@ -34,8 +34,7 @@ An HTTPS collector or object-storage API is not implemented by this backend.
   Downloads verify the signed manifest and serve the same bytes they checked.
   The report records whether the source evidence verified when it was generated;
   a preserved report remains exportable if the live ledger is later damaged.
-- The dashboard has four simple views: Overview, Activity, Evidence, and
-  Reports. It shows plain-language next steps instead of a dense SOC wall.
+- The dashboard opens in a simple **Command Center** with three-step setup guidance. Other views are Activity, Threat Investigation, Evidence, Daily Reports, and Simulation Lab. Analyst mode reveals technical details on request.
 - Host sensors are best-effort and expose their health state. A sensor failure
   is visible without making the forensic ledger pretend it collected data.
 - Windows process-start notifications complement filesystem push events and
@@ -71,9 +70,7 @@ or, on Windows, `start.bat` / `Install_CryptoVeil_App.bat`.
 3. Enter the one-use code in the extension popup. Codes expire after five
    minutes and accept at most five failed attempts.
 
-The popup shows whether the application is online, how many observations are
-queued, the last durable receipt, and whether collection has been paused by an
-integrity failure.
+The popup shows current website trust, verdict, sensitive-field category count, Shadow AI observation availability, and desktop connection/authentication status. Queued events are delivered in the background only after durable acknowledgment.
 
 Pair each Chrome or Edge profile separately. Your choice of search engine does
 not affect collection. In **Connected browser and account**, optionally choose
@@ -81,6 +78,9 @@ not affect collection. In **Connected browser and account**, optionally choose
 to future evidence and reports only after this choice. Manual labels are not
 verified sign-in; no inbox access is requested. **Stop sharing account email**
 removes the optional permissions; previously saved evidence retains its labels.
+
+A practical Windows setup and demonstration script is available in
+[Windows demo and troubleshooting guide](docs/WINDOWS_DEMO_GUIDE.md).
 
 ## Evidence and integrity files
 
@@ -100,7 +100,7 @@ data/
 │   ├── checkpoints/                # immutable checkpoint copies
 │   ├── reports/                    # separately saved signed report manifests
 │   └── head.json                   # signed head, counts and unsealed hashes
-└── reports/YYYY-MM-DD/<snapshot>/   # versioned daily report bundles
+└── reports/YYYY-MM-DD/<snapshot>/   # versioned signed daily bundles, seals and summaries
 ```
 
 For a recorded event, the ledger stores the event, its sequence number, the
@@ -154,6 +154,21 @@ Available endpoints:
 
 PDF and CSV exports are intentionally conservative: text is escaped and CSV
 cells that could be interpreted as spreadsheet formulas are prefixed safely.
+
+### Date-wise forensic exports
+
+The Evidence screen provides **Verify all dates**, **JSON Events**, **PDF Report**,
+**Hash & Metadata**, and **All Evidence ZIP**. New signed daily snapshots
+contain `daily_seal.json` and `daily_summary.json`, which tie the day's
+sequence range, final chain hash and Merkle root to the previous sealed day
+when one was available at generation. Signed manifests bind the exported bytes.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/evidence/daily` | List daily signed evidence |
+| `GET /api/evidence/daily/verify-all` | Verify current snapshots for all dates |
+| `GET /api/evidence/daily/{date}/verify` | Verify one day |
+| `GET /api/evidence/daily/{date}/download?format=events\|pdf\|metadata\|zip` | Export a verified day's evidence |
 
 ## API and security boundaries
 
