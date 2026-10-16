@@ -10,6 +10,10 @@ const state = {
   polling: false,
   live: false,
   investigation: null,
+  exportToken: "",
+  exportExpires: 0,
+  exportDate: null,
+  exportConfigured: false,
   mode: localStorage.getItem("cv_interface_mode") === "analyst" ? "analyst" : "simple",
 };
 const titles = {
@@ -1164,40 +1168,13 @@ async function loadDailyEvidence() {
       }),
     );
 
-    const eventsButton = node("button", "text-button", "JSON Events ↓");
-    eventsButton.disabled = !day.verified;
-    eventsButton.addEventListener("click", () =>
-      action(eventsButton, () => downloadDailyEvidence(day.date, "events")),
-    );
-
-    const pdfButton = node("button", "text-button", "PDF Report ↓");
-    pdfButton.disabled = !day.verified;
-    pdfButton.addEventListener("click", () =>
-      action(pdfButton, () => downloadDailyEvidence(day.date, "pdf")),
-    );
-
-    const metadataButton = node("button", "text-button", "Hash & Metadata ↓");
-    metadataButton.disabled = !day.verified;
-    metadataButton.addEventListener("click", () =>
-      action(metadataButton, () => downloadDailyEvidence(day.date, "metadata")),
-    );
-
-    const zipButton = node("button", "text-button", "All Evidence ZIP ↓");
-    zipButton.disabled = !day.verified;
-    zipButton.addEventListener("click", () =>
-      action(zipButton, () => downloadDailyEvidence(day.date, "zip")),
-    );
-
+    const exportButton = node("button", "text-button", "Authorized export →");
+    exportButton.disabled = !day.verified;
+    exportButton.addEventListener("click", () => openExportDialog(day.date));
     actions.append(
       verifyButton,
       node("span", "action-separator", "·"),
-      eventsButton,
-      node("span", "action-separator", "·"),
-      pdfButton,
-      node("span", "action-separator", "·"),
-      metadataButton,
-      node("span", "action-separator", "·"),
-      zipButton,
+      exportButton,
     );
 
     row.append(
@@ -1211,16 +1188,88 @@ async function loadDailyEvidence() {
   }
 }
 
+function updateExportState() {
+  const valid = Boolean(state.exportToken && Date.now() < state.exportExpires);
+  const setup = !state.exportConfigured;
+  $("export-auth-form").hidden = valid;
+  $("vault-export-options").hidden = !valid;
+  $("vault-confirm-wrap").hidden = !setup || valid;
+  $("vault-setup-note").hidden = !setup || valid;
+  $("vault-confirm").required = setup && !valid;
+  $("vault-authorize").textContent = setup ? "Set owner passphrase" : "Unlock evidence exports";
+  $("vault-passphrase-label").textContent = setup
+    ? "Create owner passphrase (16–128 characters)"
+    : "Enter owner passphrase";
+  if (valid) {
+    $("vault-export-status").textContent =
+      "Authorized for this running application only, for up to five minutes.";
+  }
+}
+
+async function openExportDialog(date) {
+  state.exportDate = date;
+  $("export-date-label").textContent = `Selected date: ${date}`;
+  $("vault-export-status").textContent = "";
+  $("vault-passphrase").value = "";
+  $("vault-confirm").value = "";
+  const access = await api("/api/export/access");
+  state.exportConfigured = Boolean(access.configured);
+  updateExportState();
+  $("export-dialog").showModal();
+}
+
+async function authorizeExport(event) {
+  event.preventDefault();
+  await action($("vault-authorize"), async () => {
+    const passphrase = $("vault-passphrase").value;
+    if (!state.exportConfigured) {
+      if (passphrase.length < 16)
+        throw new Error("Create an owner passphrase of at least 16 characters.");
+      if (passphrase !== $("vault-confirm").value)
+        throw new Error("The repeated passphrase does not match.");
+    }
+    const result = await api(
+      state.exportConfigured ? "/api/export/unlock" : "/api/export/configure",
+      { passphrase },
+    );
+    state.exportToken = result.token;
+    state.exportExpires = Date.now() + result.expires_in_seconds * 1000;
+    state.exportConfigured = true;
+    $("vault-passphrase").value = "";
+    $("vault-confirm").value = "";
+    updateExportState();
+  }, "vault-export-status");
+}
+
+async function lockExport() {
+  try {
+    await api("/api/export/lock", {});
+  } finally {
+    state.exportToken = "";
+    state.exportExpires = 0;
+    updateExportState();
+    $("vault-export-status").textContent = "Export access locked.";
+  }
+}
+
 async function downloadDailyEvidence(date, format) {
   const res = await fetch(
     `/api/evidence/daily/${encodeURIComponent(date)}/download?format=${encodeURIComponent(format)}`,
-    { cache: "no-store" },
+    {
+      cache: "no-store",
+      headers: { "X-CryptoVeil-Vault": state.exportToken },
+    },
   );
   if (!res.ok) {
     let data = {};
     try {
       data = await res.json();
     } catch {}
+    if (res.status === 403) {
+      state.exportToken = "";
+      state.exportExpires = 0;
+      updateExportState();
+    }
     throw new Error(errorText(data));
   }
   const url = URL.createObjectURL(await res.blob());
@@ -1454,6 +1503,20 @@ $("clear-lab-results").addEventListener("click", () => {
   $("demo-simulation-panel").hidden = true;
   $("lab-demo-results").replaceChildren();
 });
+
+$("export-auth-form").addEventListener("submit", authorizeExport);
+$("vault-lock").addEventListener("click", (event) =>
+  action(event.currentTarget, lockExport, "vault-export-status"),
+);
+$("vault-download").addEventListener("click", (event) =>
+  action(event.currentTarget, async () => {
+    if (!state.exportDate || !state.exportToken || Date.now() >= state.exportExpires)
+      throw new Error("Unlock evidence exports before downloading.");
+    await downloadDailyEvidence(state.exportDate, $("vault-export-format").value);
+    $("export-dialog").close();
+    toast("Verified evidence exported; the export was logged.");
+  }, "vault-export-status"),
+);
 
 $("verify-all-daily-evidence").addEventListener("click", (event) =>
   action(event.currentTarget, async () => {
