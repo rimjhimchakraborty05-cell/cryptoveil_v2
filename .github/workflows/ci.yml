@@ -39,6 +39,7 @@ jobs:
           node --check extension/signals.js
           node --check extension/popup.js
           node --check dashboard/js/dashboard.js
+          node --check tests/extension_live_integration.mjs
       - name: Test extension delivery
         run: node --test tests/extension.test.mjs
 
@@ -52,10 +53,116 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Install desktop build dependencies
         run: python -m pip install -r requirements.txt "pyinstaller>=6,<7"
       - name: Build Windows application
         run: python -m PyInstaller --noconfirm --clean CryptoVeil.spec
+      - name: End-to-end smoke test packaged Windows application
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path ".\\dist\\CryptoVeil\\CryptoVeil.exe"
+          $env:CRYPTOVEIL_DATA_DIR = Join-Path $env:RUNNER_TEMP "cryptoveil-smoke-data"
+          $env:CRYPTOVEIL_ARCHIVE_DIR = Join-Path $env:RUNNER_TEMP "cryptoveil-smoke-archive"
+          $env:CRYPTOVEIL_SMOKE_SECONDS = "12"
+
+          $process = Start-Process -FilePath $exe -PassThru
+          $health = $null
+          for ($i = 0; $i -lt 80; $i++) {
+            try {
+              $health = Invoke-RestMethod "http://127.0.0.1:8765/api/health" -TimeoutSec 1
+              if ($health.status -eq "ok") { break }
+            } catch {}
+            Start-Sleep -Milliseconds 250
+          }
+          if (-not $health -or $health.status -ne "ok") {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw "Packaged CryptoVeil backend did not become healthy"
+          }
+          if ($health.version -ne "2.2.0") {
+            throw "Unexpected packaged backend version: $($health.version)"
+          }
+
+          $dashboard = Invoke-WebRequest "http://127.0.0.1:8765/dashboard/" -TimeoutSec 3
+          if ($dashboard.StatusCode -ne 200 -or $dashboard.Content -notmatch "CryptoVeil") {
+            throw "Packaged dashboard assets are unavailable"
+          }
+
+          $sessionData = Invoke-RestMethod "http://127.0.0.1:8765/api/session" -SessionVariable cvSession -TimeoutSec 3
+          if (-not $sessionData.csrf_token) {
+            throw "Packaged dashboard session was not created"
+          }
+          $readiness = Invoke-RestMethod "http://127.0.0.1:8765/api/runtime/readiness" -WebSession $cvSession -TimeoutSec 3
+          foreach ($required in @("data_directory", "archive_directory", "rules_file", "dashboard_assets", "extension_assets")) {
+            if (-not $readiness.checks.$required) {
+              throw "Packaged runtime readiness check failed: $required"
+            }
+          }
+          if ($readiness.paths.data -ne (Resolve-Path $env:CRYPTOVEIL_DATA_DIR).Path) {
+            throw "Packaged runtime is not using the configured persistent data directory"
+          }
+
+          # Exercise the actual extension service-worker code against the
+          # packaged backend. Pairing and the first event must receive a
+          # durable storage receipt before the extension queue is cleared.
+          $extensionState = Join-Path $env:RUNNER_TEMP "cryptoveil-extension-state.json"
+          node tests/extension_live_integration.mjs pair $extensionState
+          if ($LASTEXITCODE -ne 0) {
+            throw "Extension-to-packaged-app pairing integration failed"
+          }
+
+          Wait-Process -Id $process.Id -Timeout 30
+          $process.Refresh()
+          if ($process.ExitCode -ne 0) {
+            throw "Packaged CryptoVeil exited with code $($process.ExitCode)"
+          }
+          if (-not (Test-Path (Join-Path $env:CRYPTOVEIL_DATA_DIR "desktop_app.log"))) {
+            throw "Packaged CryptoVeil did not initialize its persistent runtime directory"
+          }
+
+          # With the app offline, the same real extension worker must retain
+          # its event and pairing token rather than discarding evidence.
+          node tests/extension_live_integration.mjs offline $extensionState
+          if ($LASTEXITCODE -ne 0) {
+            throw "Extension offline queue persistence failed"
+          }
+
+          # Restart using the same persistent directories to catch startup,
+          # locking, stale-session, pairing-token, and queue-recovery regressions.
+          $env:CRYPTOVEIL_SMOKE_SECONDS = "12"
+          $restart = Start-Process -FilePath $exe -PassThru
+          $restartHealthy = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            try {
+              $again = Invoke-RestMethod "http://127.0.0.1:8765/api/health" -TimeoutSec 1
+              if ($again.status -eq "ok") {
+                $restartHealthy = $true
+                break
+              }
+            } catch {}
+            Start-Sleep -Milliseconds 250
+          }
+          if (-not $restartHealthy) {
+            Stop-Process -Id $restart.Id -Force -ErrorAction SilentlyContinue
+            throw "Packaged CryptoVeil failed to restart using existing runtime data"
+          }
+
+          # The extension worker reloads from its persisted state. Its queued
+          # event must now be acknowledged by the restarted packaged app and
+          # appear in the forensic event store.
+          node tests/extension_live_integration.mjs recover $extensionState
+          if ($LASTEXITCODE -ne 0) {
+            Stop-Process -Id $restart.Id -Force -ErrorAction SilentlyContinue
+            throw "Extension queue recovery after packaged-app restart failed"
+          }
+
+          Wait-Process -Id $restart.Id -Timeout 25
+          $restart.Refresh()
+          if ($restart.ExitCode -ne 0) {
+            throw "Restarted packaged CryptoVeil exited with code $($restart.ExitCode)"
+          }
       - name: Upload Windows application
         uses: actions/upload-artifact@v4
         with:

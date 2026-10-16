@@ -11,13 +11,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agent.bus.event_bus import EventBroker
-from agent.bus.events import BaseEvent
+from agent.bus.events import BaseEvent, MitreAlertEvent
 from agent.forensics.audit_logger import AuditLogger, IntegrityError
 from agent.forensics.evidence_archive import EvidenceArchive
 from agent.reports.export import safe_cell
 from agent.reports.scheduler import ReportScheduler
 from agent.reports.store import ReportStore
 from agent.server.main import Settings, create_app
+from agent.server.security import PairingManager
 
 EXTENSION = "chrome-extension://" + "a" * 32
 
@@ -55,6 +56,14 @@ def pair(client):
     assert result.status_code == 200
     token = result.json()["token"]
     return {"Authorization": f"Bearer {token}", "Origin": EXTENSION}
+
+
+def unlock_exports(client):
+    dashboard(client)
+    passphrase = "cryptoveil-owner-test-passphrase"
+    configured = client.post("/api/export/configure", json={"passphrase": passphrase})
+    assert configured.status_code == 200
+    client.headers["X-CryptoVeil-Vault"] = configured.json()["token"]
 
 
 def telemetry(**changes):
@@ -95,6 +104,53 @@ def test_auth_origin_and_csrf_boundaries(client):
         == 200
     )
     assert client.post("/api/pairing/complete", json={"code": "00000000"}).status_code == 403
+
+
+def test_investigation_api_returns_real_findings_and_mitre_summary(client):
+    dashboard(client)
+    alert = MitreAlertEvent(
+        mitre_id="T1059",
+        mitre_name="Command and Scripting Interpreter",
+        description="Office launched a shell",
+        pid=77,
+        process_name="powershell.exe",
+        parent_name="winword.exe",
+        cmdline="powershell.exe -NoProfile",
+        rule_id="office-shell",
+    )
+    client.app.state.audit_logger.record(alert.model_dump(mode="json"))
+
+    response = client.get("/api/investigation")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["summary"]["findings"] == 1
+    assert data["summary"]["mitre_alerts"] == 1
+    assert data["mitre_techniques"] == [
+        {
+            "id": "T1059",
+            "name": "Command and Scripting Interpreter",
+            "count": 1,
+        }
+    ]
+    assert data["recent_findings"][0]["event"]["rule_id"] == "office-shell"
+    assert "process_graph" in data
+
+
+def test_runtime_readiness_reports_persistent_assets_without_exposing_secrets(client):
+    dashboard(client)
+    response = client.get("/api/runtime/readiness")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["version"]
+    assert data["loopback_only"] is True
+    assert data["checks"]["data_directory"] is True
+    assert data["checks"]["archive_directory"] is True
+    assert data["checks"]["rules_file"] is True
+    assert data["checks"]["dashboard_assets"] is True
+    assert data["checks"]["extension_assets"] is True
+    assert "csrf_token" not in data
+    assert "session_token" not in data
+    assert "private_key" not in data
 
 
 def test_browser_account_context_is_saved_per_event_and_survives_identity_changes(client):
@@ -163,6 +219,31 @@ def test_profile_email_requires_an_explicit_matching_source(client):
             ).status_code
             == 422
         )
+
+
+def test_paired_browser_token_survives_application_restart(tmp_path):
+    first = PairingManager(tmp_path)
+    code = first.new_code()["code"]
+    result = first.complete(code, "Edge profile", EXTENSION)
+    token = result["token"]
+    client_id = result["client_id"]
+
+    restarted = PairingManager(tmp_path)
+    client = restarted.authenticate(token, EXTENSION)
+
+    assert client is not None
+    assert client["id"] == client_id
+    assert client["name"] == "Edge profile"
+
+
+def test_persisted_pairing_stays_bound_to_original_extension_origin(tmp_path):
+    first = PairingManager(tmp_path)
+    code = first.new_code()["code"]
+    token = first.complete(code, "Chrome profile", EXTENSION)["token"]
+
+    restarted = PairingManager(tmp_path)
+    assert restarted.authenticate(token, EXTENSION) is not None
+    assert restarted.authenticate(token, "chrome-extension://" + "b" * 32) is None
 
 
 def test_pairing_code_is_one_use_and_limited(client):
@@ -267,8 +348,173 @@ def test_tamper_detected_and_new_ingest_is_not_acknowledged(client):
     assert client.get("/api/forensics/proof/0").status_code == 409
 
 
+def test_raw_forensic_exports_require_owner_unlock_and_are_audited(client):
+    headers = pair(client)
+    assert client.post("/api/browser/telemetry", json=telemetry(), headers=headers).status_code == 200
+    generated = client.post("/api/reports/generate", json={})
+    assert generated.status_code == 200
+    date = generated.json()["date"]
+    endpoint = f"/api/evidence/daily/{date}/download?format=zip"
+
+    assert client.get(endpoint).status_code == 403
+    assert client.get(f"/api/reports/{date}/download?format=pdf").status_code == 403
+    assert client.get(f"/api/reports/{date}").status_code == 403
+    assert client.get("/api/forensics/archive/0").status_code == 403
+    assert client.get("/api/export/access").json()["configured"] is False
+    assert client.post("/api/export/configure", json={"passphrase": "short"}).status_code == 409
+
+    secret = "strong-local-owner-passphrase"
+    enrollment = client.post("/api/export/configure", json={"passphrase": secret})
+    assert enrollment.status_code == 200
+    assert client.post("/api/export/configure", json={"passphrase": secret}).status_code == 409
+    assert client.get(endpoint).status_code == 403
+
+    with_token = {"X-CryptoVeil-Vault": enrollment.json()["token"]}
+    response = client.get(endpoint, headers=with_token)
+    assert response.status_code == 200
+    audit = client.app.state.audit_logger
+    exported = [
+        entry for entry in audit.recent_entries(100)
+        if entry["event"].get("topic") == "security.evidence.exported"
+    ]
+    assert len(exported) == 1
+    assert exported[0]["event"]["format"] == "zip"
+    assert exported[0]["event"]["date"] == date
+    assert exported[0]["event"]["byte_count"] == len(response.content)
+    assert audit.verify_chain()["verified"]
+
+    client.post("/api/export/lock", json={})
+    assert client.get(endpoint, headers=with_token).status_code == 403
+    assert client.post("/api/export/unlock", json={"passphrase": "incorrect"}).status_code == 403
+    unlocked = client.post("/api/export/unlock", json={"passphrase": secret})
+    assert unlocked.status_code == 200
+    assert client.get(endpoint, headers={"X-CryptoVeil-Vault": unlocked.json()["token"]}).status_code == 200
+
+
+def test_export_authorization_expires_and_rejects_brute_force(client):
+    dashboard(client)
+    secret = "sixteen-characters-are-not-a-suggestion"
+    configured = client.post("/api/export/configure", json={"passphrase": secret})
+    token = configured.json()["token"]
+    vault = client.app.state.export_vault
+    assert vault.authorized(token)
+    vault._expiry = 0
+    assert not vault.authorized(token)
+    for _ in range(5):
+        assert client.post("/api/export/unlock", json={"passphrase": "wrong"}).status_code == 403
+    limited = client.post("/api/export/unlock", json={"passphrase": secret})
+    assert limited.status_code == 403
+    assert "Wait one minute" in limited.json()["detail"]
+
+
+def test_date_wise_evidence_api_lists_verifies_and_downloads(client):
+    headers = pair(client)
+    unlock_exports(client)
+    client.post("/api/browser/telemetry", json=telemetry(), headers=headers)
+    generated = client.post("/api/reports/generate", json={})
+    assert generated.status_code == 200
+    date = generated.json()["date"]
+
+    listed = client.get("/api/evidence/daily")
+    assert listed.status_code == 200
+    payload = listed.json()
+    assert payload["days"] and payload["days"][0]["date"] == date
+    assert "host_separation_verified" in payload["archive"]
+
+    verified = client.get(f"/api/evidence/daily/{date}/verify")
+    assert verified.status_code == 200
+    assert verified.json()["verified"]
+    assert verified.json()["daily_seal_verified"] is True
+    assert verified.json()["daily_link_verified"] is True
+
+    verified_all = client.get("/api/evidence/daily/verify-all")
+    assert verified_all.status_code == 200
+    assert verified_all.json()["verified"] is True
+    assert verified_all.json()["dates_checked"] >= 1
+
+    evidence_zip = client.get(f"/api/evidence/daily/{date}/download?format=zip")
+    assert evidence_zip.status_code == 200
+    assert evidence_zip.headers["content-type"].startswith("application/zip")
+    with zipfile.ZipFile(io.BytesIO(evidence_zip.content)) as bundle:
+        assert "evidence.jsonl" in bundle.namelist()
+        assert "checkpoints.json" in bundle.namelist()
+        assert "manifest.json" in bundle.namelist()
+        assert "daily_seal.json" in bundle.namelist()
+        assert "daily_summary.json" in bundle.namelist()
+
+    evidence_json = client.get(f"/api/evidence/daily/{date}/download?format=json")
+    assert evidence_json.status_code == 200
+    assert evidence_json.headers["content-type"].startswith("application/json")
+
+    events = client.get(f"/api/evidence/daily/{date}/download?format=events")
+    assert events.status_code == 200
+    assert events.headers["content-type"].startswith("application/x-ndjson")
+    assert b'"seq":0' in events.content
+
+    metadata = client.get(f"/api/evidence/daily/{date}/download?format=metadata")
+    assert metadata.status_code == 200
+    metadata_body = metadata.json()
+    assert metadata_body["verification"]["verified"] is True
+    assert metadata_body["daily_seal"]["kind"] == "daily_evidence_seal"
+    assert metadata_body["manifest"]["kind"] == "daily_evidence_bundle"
+
+    pdf = client.get(f"/api/evidence/daily/{date}/download?format=pdf")
+    assert pdf.status_code == 200
+    assert pdf.content.startswith(b"%PDF")
+
+
+def test_daily_seals_link_consecutive_days_and_fail_closed_on_tamper(client):
+    pair(client)
+    audit = client.app.state.audit_logger
+    now = datetime.now(UTC)
+    yesterday = now - timedelta(days=1)
+
+    audit.record(
+        {
+            "event_id": str(uuid.uuid4()),
+            "timestamp": yesterday.timestamp(),
+            "topic": "sensor.process.spawned",
+            "severity": "info",
+            "source": "endpoint",
+            "name": "yesterday-test.exe",
+        }
+    )
+    audit.record(
+        {
+            "event_id": str(uuid.uuid4()),
+            "timestamp": now.timestamp(),
+            "topic": "sensor.process.spawned",
+            "severity": "info",
+            "source": "endpoint",
+            "name": "today-test.exe",
+        }
+    )
+
+    yesterday_date = yesterday.strftime("%Y-%m-%d")
+    today_date = now.strftime("%Y-%m-%d")
+    first = client.post(f"/api/reports/generate?date={yesterday_date}", json={})
+    second = client.post(f"/api/reports/generate?date={today_date}", json={})
+    assert first.status_code == 200 and second.status_code == 200
+
+    store = client.app.state.report_store
+    first_path = store.directory / yesterday_date / first.json()["version"] / "daily_seal.json"
+    second_path = store.directory / today_date / second.json()["version"] / "daily_seal.json"
+    first_seal = json.loads(first_path.read_text())
+    second_seal = json.loads(second_path.read_text())
+
+    assert first_seal["kind"] == "daily_evidence_seal"
+    assert second_seal["previous_day_root"] == first_seal["daily_merkle_root"]
+    assert client.get("/api/evidence/daily/verify-all").json()["verified"] is True
+
+    first_path.write_text(first_path.read_text().replace('"event_count":1', '"event_count":2'))
+    assert client.get(f"/api/evidence/daily/{yesterday_date}/verify").json()["verified"] is False
+    assert client.get(f"/api/evidence/daily/{today_date}/verify").json()["verified"] is False
+    assert client.get("/api/evidence/daily/verify-all").json()["verified"] is False
+
+
 def test_report_exports_are_saved_signed_and_tamper_checked(client):
     headers = pair(client)
+    unlock_exports(client)
     client.post("/api/browser/telemetry", json=telemetry(), headers=headers)
     generated = client.post("/api/reports/generate", json={})
     assert generated.status_code == 200
@@ -288,6 +534,8 @@ def test_report_exports_are_saved_signed_and_tamper_checked(client):
                     "report.json",
                     "evidence.jsonl",
                     "checkpoints.json",
+                    "daily_seal.json",
+                    "daily_summary.json",
                 }
                 manifest = json.loads(bundle.read("manifest.json"))
                 assert client.app.state.audit_logger.verify_signature(
@@ -325,6 +573,7 @@ def test_malformed_report_manifest_fails_without_crashing(client, payload):
 
 def test_download_serves_only_the_bytes_it_verified(client, monkeypatch):
     pair(client)
+    unlock_exports(client)
     generated = client.post("/api/reports/generate", json={}).json()
     store = client.app.state.report_store
     target = store.directory / generated["date"] / generated["version"] / "report.csv"

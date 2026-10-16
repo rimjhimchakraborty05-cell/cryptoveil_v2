@@ -8,119 +8,122 @@
     <script src="popup.js" defer></script>
   </head>
   <body>
-    <header>
+    <header class="brand">
       <div class="mark" aria-hidden="true">C</div>
       <div>
         <h1>CryptoVeil</h1>
-        <p>Browser evidence, clearly.</p>
+        <p>Browser protection status</p>
       </div>
     </header>
-    <div id="connection" class="status" role="status">Checking connection…</div>
+
     <form id="pair-form">
-      <h2>Pair with your application</h2>
-      <p>
-        In the app, choose <b>Connect browser</b> and generate a pairing code.
-      </p>
-      <label
-        >Browser name<input
-          id="browser-name"
-          value="My browser"
-          maxlength="60"
-          required
-          autocomplete="off" /></label
-      ><label
-        >One-use pairing code<input
-          id="pair-code"
-          placeholder="8-digit code"
-          inputmode="numeric"
-          pattern="[0-9]{8}"
-          maxlength="8"
-          required
-          autocomplete="off"
-      /></label>
-      <details>
-        <summary>Application address</summary>
-        <label
-          >Local app URL<input
-            id="app-url"
-            type="url"
-            value="http://127.0.0.1:8765"
+      <div class="setup-card">
+        <span class="eyebrow">FIRST-TIME CONNECTION</span>
+        <h2>Connect this browser</h2>
+        <p>
+          In the CryptoVeil desktop app, choose <b>Connect browser</b> and
+          enter the one-use code below.
+        </p>
+        <label>
+          Browser name
+          <input
+            id="browser-name"
+            value="My browser"
+            maxlength="60"
             required
-        /></label>
-      </details>
-      <button type="submit" id="pair-button">Pair with application</button>
-    </form>
-    <section id="paired-panel" hidden>
-      <h2 id="browser-label">Your browser</h2>
-      <div class="stats">
-        <div>
-          <strong id="queued">0</strong><span>Waiting to be saved</span>
-        </div>
-        <div>
-          <strong id="saved">—</strong><span>Latest evidence record</span>
-        </div>
-      </div>
-      <p id="delivery-note" class="note"></p>
-      <button id="retry-button" class="secondary">Retry delivery</button>
-    </section>
-    <details id="account-panel" hidden>
-      <summary>Connected browser and account</summary>
-      <p id="account-status" class="note"></p>
-      <p class="note">
-        Optionally attach your profile email to future evidence and reports.
-        This does not read your inbox. Existing evidence keeps its original
-        label.
-      </p>
-      <button id="profile-account" type="button" class="secondary">
-        Use browser profile email
-      </button>
-      <form id="account-form">
-        <label
-          >Email label<input
-            id="account-email"
-            type="email"
-            maxlength="254"
             autocomplete="off"
+          />
+        </label>
+        <label>
+          One-use pairing code
+          <input
+            id="pair-code"
+            placeholder="8-digit code"
+            inputmode="numeric"
+            pattern="[0-9]{8}"
+            maxlength="8"
             required
-            placeholder="name@example.com"
-        /></label>
-        <button id="manual-account" type="submit">
-          Save manual email label
-        </button>
-      </form>
-      <button id="clear-account" type="button" class="secondary">
-        Stop sharing account email
-      </button>
-      <p class="note">
-        A manual label is not verified sign-in. Each browser profile must be
-        paired separately; your search engine does not affect collection.
-      </p>
-    </details>
-    <section class="site">
-      <h2>Current website</h2>
-      <strong id="site-name">—</strong>
-      <p id="site-score">
-        Open an HTTP or HTTPS page to see a local risk estimate.
-      </p>
-      <ul id="site-reasons"></ul>
-      <p class="note">
-        A heuristic score is not a safety guarantee. Known AI service
-        connections are observations, not proof of a data leak.
-      </p>
-    </section>
-    <label class="toggle"
-      ><input id="mask-toggle" type="checkbox" /><span
-        >Visually hide sensitive fields<small
-          >Hides text on screen. Does not stop page scripts reading it.</small
-        ></span
-      ></label
-    >
+            autocomplete="off"
+          />
+        </label>
+        <details>
+          <summary>Application address</summary>
+          <label>
+            Local app URL
+            <input
+              id="app-url"
+              type="url"
+              value="http://127.0.0.1:8765"
+              required
+            />
+          </label>
+        </details>
+        <button type="submit" id="pair-button">Connect securely</button>
+      </div>
+    </form>
+
+    <main id="security-panel" hidden>
+      <section class="site-card" aria-labelledby="site-heading">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">CURRENT WEBSITE</span>
+            <h2 id="site-heading">Website trust</h2>
+          </div>
+          <span id="site-verdict" class="verdict neutral">Checking</span>
+        </div>
+        <strong id="site-name" class="hostname">—</strong>
+        <div class="score-row">
+          <div id="score-ring" class="score-ring neutral" aria-label="Website trust score">
+            <strong id="site-score-number">—</strong>
+            <span>/100</span>
+          </div>
+          <p id="site-score-text">
+            Open an HTTP or HTTPS page to calculate the local trust score.
+          </p>
+        </div>
+      </section>
+
+      <section class="status-card" aria-label="CryptoVeil browser status">
+        <div class="status-row">
+          <div>
+            <span class="status-label">CryptoVeil Extension</span>
+            <small>Connection to the desktop application</small>
+          </div>
+          <span id="extension-status" class="status-value neutral">Checking</span>
+        </div>
+
+        <div class="status-row">
+          <div>
+            <span class="status-label">Desktop Authentication</span>
+            <small>Paired local application identity</small>
+          </div>
+          <span id="auth-status" class="status-value neutral">Checking</span>
+        </div>
+
+        <div class="status-row">
+          <div>
+            <span class="status-label">Sensitive Fields</span>
+            <small>Detected on the current page</small>
+          </div>
+          <span id="sensitive-status" class="status-value neutral">—</span>
+        </div>
+
+        <div class="status-row">
+          <div>
+            <span class="status-label">Shadow AI Monitoring</span>
+            <small>Browser-side AI service observation</small>
+          </div>
+          <span id="shadow-status" class="status-value neutral">Checking</span>
+        </div>
+      </section>
+
+      <p id="connection-note" class="connection-note" role="status"></p>
+      <button id="open-app" class="secondary full">Open CryptoVeil application ↗</button>
+    </main>
+
     <p id="message" role="alert"></p>
-    <button id="open-app" class="secondary full">
-      Open CryptoVeil application ↗
-    </button>
     <footer>
-      No form values, passwords or URL query strings are collected.
+      CryptoVeil does not collect passwords, form values, or URL query strings.
     </footer>
   </body>
 </html>
