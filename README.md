@@ -35,6 +35,8 @@ An HTTPS collector or object-storage API is not implemented by this backend.
   The report records whether the source evidence verified when it was generated;
   a preserved report remains exportable if the live ledger is later damaged.
 - The dashboard opens in a simple **Command Center** with three-step setup guidance. Other views are Activity, Threat Investigation, Evidence, Daily Reports, and Simulation Lab. Analyst mode reveals technical details on request.
+- Only the Evidence view offers authorized forensic exports; the Reports view
+  creates snapshots, and the Simulation Lab owns demonstration workflows.
 - Host sensors are best-effort and expose their health state. A sensor failure
   is visible without making the forensic ledger pretend it collected data.
 - Windows process-start notifications complement filesystem push events and
@@ -154,6 +156,32 @@ Available endpoints:
 
 PDF and CSV exports are intentionally conservative: text is escaped and CSV
 cells that could be interpreted as spreadsheet formulas are prefixed safely.
+
+### Authorized forensic export
+
+The Evidence screen is the **only place in the dashboard** where forensic
+downloads are requested. The Daily Reports view creates and lists snapshots
+but does not duplicate export options. The isolated tampering demonstration
+is only in Simulation Lab.
+
+On the first export, the local owner sets a passphrase of 16–128 characters.
+It is stored as a salted scrypt verifier, **never as plaintext**. Subsequent
+exports require the owner passphrase, which issues a random five-minute token
+kept in dashboard memory only. The backend checks this token on the actual
+download routes (including old report downloads), so hiding a button is not
+the security boundary. Invalid unlock attempts are temporarily rate limited.
+
+All successful exports append a receipt event to the tamper-evident evidence
+ledger, recording the date, format, byte length and SHA-256 of the exported
+bytes. If the audit event cannot be saved, the server refuses the export.
+
+**Scope:** This is local-owner step-up authorization, not a multi-user RBAC
+system, evidence encryption, or a full OS identity boundary. The current
+dashboard remains accessible to local users with a valid application session
+and exposes some observation metadata. Downloaded evidence is not encrypted;
+store it in a protected location. The owner passphrase cannot be recovered or
+reset silently if lost. The physical archive requires independently controlled
+storage to resist total host compromise.
 
 ### Date-wise forensic exports
 
