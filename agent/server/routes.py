@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import re
 import sys
@@ -19,6 +20,7 @@ from ..forensics.audit_logger import AuditLogger, IntegrityError
 from ..reports.report_generator import describe_event, next_step
 from ..reports.store import valid_date
 from ..version import VERSION
+from .export_vault import VaultAccessError
 from .sensor_tests import SensorTestUnavailable
 
 router = APIRouter()
@@ -26,6 +28,69 @@ router = APIRouter()
 
 class StrictPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class ExportPassphrase(StrictPayload):
+    passphrase: str = Field(min_length=1, max_length=128)
+
+
+@router.get("/api/export/access")
+def export_access(request: Request):
+    return {"configured": request.app.state.export_vault.configured, "mode": "local_owner_step_up"}
+
+
+@router.post("/api/export/configure")
+def configure_export(payload: ExportPassphrase, request: Request):
+    try:
+        return request.app.state.export_vault.configure(payload.passphrase)
+    except VaultAccessError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/api/export/unlock")
+def unlock_export(payload: ExportPassphrase, request: Request):
+    try:
+        return request.app.state.export_vault.unlock(payload.passphrase)
+    except VaultAccessError as exc:
+        raise HTTPException(403, str(exc)) from exc
+
+
+@router.post("/api/export/lock")
+def lock_export(request: Request):
+    request.app.state.export_vault.lock()
+    return {"locked": True}
+
+
+def require_export_access(request: Request) -> None:
+    if not request.app.state.export_vault.authorized(
+        request.headers.get("x-cryptoveil-vault", "")
+    ):
+        raise HTTPException(
+            403,
+            "Forensic exports require a short-lived owner unlock from the Evidence screen",
+        )
+
+
+def audit_export(request: Request, date: str, fmt: str, data: bytes) -> None:
+    audit = request.app.state.audit_logger
+    try:
+        audit.record(
+            {
+                "event_id": str(uuid.uuid4()),
+                "timestamp": time.time(),
+                "source": "forensics",
+                "severity": "info",
+                "topic": "security.evidence.exported",
+                "event_kind": "authorized_export",
+                "date": date,
+                "format": fmt,
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "byte_count": len(data),
+            }
+        )
+    except (IntegrityError, ValueError, OSError) as exc:
+        raise HTTPException(503, "Evidence export audit could not be preserved") from exc
+    request.app.state.live.notify()
 
 
 @router.get("/api/health")
@@ -419,6 +484,7 @@ def verify_proof(payload: ProofPayload, request: Request):
 
 @router.get("/api/forensics/archive/{seq}")
 def archived_evidence(seq: int, request: Request):
+    require_export_access(request)
     if seq < 0:
         raise HTTPException(422, "Evidence number must be non-negative")
     audit = request.app.state.audit_logger
@@ -568,6 +634,7 @@ def download_daily_evidence(
     request: Request,
     format: Literal["zip", "json", "pdf", "events", "metadata"] = "zip",
 ):
+    require_export_access(request)
     try:
         data, media_type, filename = request.app.state.report_store.download(
             valid_date(date), format
@@ -576,6 +643,7 @@ def download_daily_evidence(
         raise HTTPException(422, str(exc)) from exc
     except IntegrityError as exc:
         raise HTTPException(409, str(exc)) from exc
+    audit_export(request, date, format, data)
     return Response(
         data,
         media_type=media_type,
@@ -610,6 +678,7 @@ def verify_report(date: str, request: Request):
 def download_report(
     date: str, request: Request, format: Literal["pdf", "csv", "json", "zip"] = "pdf"
 ):
+    require_export_access(request)
     try:
         data, media_type, filename = request.app.state.report_store.download(
             valid_date(date), format
@@ -618,6 +687,7 @@ def download_report(
         raise HTTPException(422, str(exc)) from exc
     except IntegrityError as exc:
         raise HTTPException(409, str(exc)) from exc
+    audit_export(request, date, format, data)
     return Response(
         data,
         media_type=media_type,
@@ -627,6 +697,7 @@ def download_report(
 
 @router.get("/api/reports/{date}")
 def get_report(date: str, request: Request):
+    require_export_access(request)
     try:
         result = request.app.state.report_store.get(valid_date(date))
     except ValueError as exc:
