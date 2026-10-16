@@ -31,6 +31,18 @@ Pair each browser profile separately. Never share pairing codes, authentication 
 | 4:15–5:15 | Download an evidence bundle | Export JSON Events, PDF Report, Hash & Metadata and ZIP; inspect signed `manifest.json` and `daily_seal.json` |
 | 5:15–6:00 | Simulation Lab → Demo Simulations | Tamper evidence in **temporary sample data**; the real ledger is never edited |
 
+## Authorize an evidence export
+
+On the Evidence screen, choose **Authorized export** for a verified date.
+
+1. For the first export, set an owner passphrase of at least **16 characters** and confirm it. Keep it safely; CryptoVeil does not have a silent reset option.
+2. For subsequent exports or after restarting CryptoVeil, enter the passphrase to unlock exports for up to **five minutes**.
+3. Select just one format in the dialog: **PDF**, **signed hashes and metadata**, **JSON events**, or **complete ZIP**.
+4. Choose **Download authorized evidence**. CryptoVeil verifies the bundle and writes an export-receipt event (date, type, SHA-256 and byte count) before sending the file.
+5. Use **Lock exports** when finished. The dashboard never stores the unlocked token in localStorage.
+
+**Limit:** This is a local-owner export gate, not enterprise role-based access control or encryption of saved files. A permitted local user may still view security event summaries. Securely store exported files.
+
 ## Restart and offline queue test
 
 1. After successfully pairing the extension, close CryptoVeil normally.
