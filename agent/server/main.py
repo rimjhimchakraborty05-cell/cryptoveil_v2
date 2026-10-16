@@ -31,8 +31,8 @@ from ..sensors.entropy_watcher import EntropyWatcher
 from ..sensors.process_watcher import ProcessWatcher
 from ..version import VERSION
 from . import routes
-from .live import LiveUpdates
 from .export_vault import EvidenceExportVault
+from .live import LiveUpdates
 from .security import PairingManager, access_guard
 from .sensor_tests import SensorTestRunner
 
