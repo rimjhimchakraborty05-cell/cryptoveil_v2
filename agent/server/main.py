@@ -32,6 +32,7 @@ from ..sensors.process_watcher import ProcessWatcher
 from ..version import VERSION
 from . import routes
 from .live import LiveUpdates
+from .export_vault import EvidenceExportVault
 from .security import PairingManager, access_guard
 from .sensor_tests import SensorTestRunner
 
@@ -138,6 +139,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             application.state.report_store = store
             application.state.scheduler = scheduler
             application.state.pairing = pairing
+            application.state.export_vault = EvidenceExportVault(settings.data_dir)
             application.state.start_time = time.time()
             application.state.sensors = sensors
             if settings.sensors_enabled:
