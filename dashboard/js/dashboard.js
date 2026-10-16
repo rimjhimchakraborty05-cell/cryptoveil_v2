@@ -1240,14 +1240,11 @@ async function authorizeExport(event) {
 }
 
 async function lockExport() {
-  try {
-    await api("/api/export/lock", {});
-  } finally {
-    state.exportToken = "";
-    state.exportExpires = 0;
-    updateExportState();
-    $("vault-export-status").textContent = "Export access locked.";
-  }
+  await api("/api/export/lock", {});
+  state.exportToken = "";
+  state.exportExpires = 0;
+  updateExportState();
+  $("vault-export-status").textContent = "Export access locked.";
 }
 
 async function downloadDailyEvidence(date, format) {
@@ -1506,8 +1503,12 @@ $("vault-lock").addEventListener("click", (event) =>
 );
 $("vault-download").addEventListener("click", (event) =>
   action(event.currentTarget, async () => {
-    if (!state.exportDate || !state.exportToken || Date.now() >= state.exportExpires)
+    if (!state.exportDate || !state.exportToken || Date.now() >= state.exportExpires) {
+      state.exportToken = "";
+      state.exportExpires = 0;
+      updateExportState();
       throw new Error("Unlock evidence exports before downloading.");
+    }
     await downloadDailyEvidence(state.exportDate, $("vault-export-format").value);
     $("export-dialog").close();
     toast("Verified evidence exported; the export was logged.");
