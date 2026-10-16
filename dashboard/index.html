@@ -567,6 +567,329 @@
           <article class="panel daily-evidence-panel">
             <div class="panel-heading">
               <div>
+                <span class="eyebrow">DATE-WISE SIGNED EVIDENCE</span>
+                <h2>Evidence by day</h2>
+                <p>
+                  Review verified signed evidence for a specific day or
+                  verify that day before export.
+                </p>
+              </div>
+              <div class="evidence-actions">
+                <button class="button secondary" id="verify-all-daily-evidence">
+                  Verify all dates
+                </button>
+                <button class="button secondary" id="refresh-daily-evidence">
+                  Refresh
+                </button>
+              </div>
+            </div>
+            <div id="archive-trust-note" class="archive-trust-note"></div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Date</th>
+                    <th scope="col">Events</th>
+                    <th scope="col">Daily seal</th>
+                    <th scope="col">Integrity</th>
+                    <th scope="col">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="daily-evidence-body"></tbody>
+              </table>
+            </div>
+            <p class="empty-state" id="daily-evidence-empty" hidden>
+              No date-wise evidence bundles have been saved yet.
+            </p>
+          </article>
+
+          <div class="overview-grid evidence-bottom">
+            <article class="panel">
+              <h2>Evidence archive</h2>
+              <p>
+                Every received record has a separate saved copy. Daily bundles
+                contain the evidence, readable reports and a signed manifest.
+              </p>
+              <button class="text-button" data-go="reports">
+                Open daily reports →
+              </button>
+              <details class="analyst-only">
+                <summary>Storage and trust details</summary>
+                <dl class="detail-list">
+                  <dt>Application data</dt>
+                  <dd><code id="data-path"></code></dd>
+                  <dt>Evidence archive</dt>
+                  <dd><code id="archive-path"></code></dd>
+                  <dt>Pinned public verification key</dt>
+                  <dd><code id="public-key"></code></dd>
+                </dl>
+                <p class="fine-print">
+                  A second folder on this device is a local backup. To preserve
+                  evidence against complete device compromise, keep signed
+                  bundles and the trusted public key on independently managed
+                  storage.
+                </p>
+                <p class="fine-print" id="legacy-note" hidden>
+                  Some older checkpoints signed only their roots. New
+                  checkpoints also authenticate sequence ranges and metadata.
+                </p>
+              </details>
+            </article>
+
+          </div>
+        </section>
+        <section
+          class="view"
+          id="view-reports"
+          aria-labelledby="reports-title"
+          hidden
+        >
+          <div class="page-heading">
+            <div>
+              <span class="eyebrow">SAVE & REVIEW</span>
+              <h1 id="reports-title">Daily reports</h1>
+              <p>
+                Readable reports and complete evidence, kept as signed
+                snapshots.
+              </p>
+            </div>
+            <button class="button secondary" id="refresh-reports">
+              Refresh
+            </button>
+          </div>
+          <div class="panel report-controls">
+            <div>
+              <h2>Save a current snapshot</h2>
+              <p>
+                Reports are saved automatically while the app runs and when it
+                closes normally.
+              </p>
+            </div>
+            <label>Reporting day<input type="date" id="report-date" /></label
+            ><button class="button primary" id="generate-report">
+              Save report
+            </button>
+          </div>
+          <p class="fine-print" id="report-timezone">
+            Report snapshots use your configured reporting timezone.
+            Verified downloads are available exclusively in Evidence.
+          </p>
+          <div class="panel table-panel">
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Time</th>
+                    <th scope="col">Observation</th>
+                    <th scope="col">Source</th>
+                    <th scope="col">Level</th>
+                    <th scope="col">Evidence</th>
+                  </tr>
+                </thead>
+                <tbody id="activity-body"></tbody>
+              </table>
+            </div>
+            <p class="empty-state" id="activity-empty" hidden>
+              No observations match this filter.
+            </p>
+          </div>
+        </section>
+        <section
+          class="view"
+          id="view-threats"
+          aria-labelledby="threats-title"
+          hidden
+        >
+          <div class="page-heading">
+            <div>
+              <span class="eyebrow">INVESTIGATE & TRACE</span>
+              <h1 id="threats-title">Threat investigation</h1>
+              <p>
+                Review suspicious behavior with process context, MITRE ATT&CK
+                mapping, and linked evidence.
+              </p>
+            </div>
+            <button class="button secondary" id="refresh-threats">
+              Refresh
+            </button>
+          </div>
+
+          <div class="metric-grid threat-metrics">
+            <article class="metric">
+              <span class="metric-label">Findings to review</span>
+              <strong id="threat-findings">—</strong>
+              <small>Within the latest 500 stored events</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">Critical findings</span>
+              <strong id="threat-critical">—</strong>
+              <small>Highest-priority investigation items</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">MITRE alerts</span>
+              <strong id="threat-mitre">—</strong>
+              <small>Process behavior matched to ATT&CK rules</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">Correlated findings</span>
+              <strong id="threat-correlated">—</strong>
+              <small>Related observations within the correlation window</small>
+            </article>
+          </div>
+
+          <div class="investigation-grid">
+            <article class="panel">
+              <div class="panel-heading">
+                <div>
+                  <span class="eyebrow">LIVE PROCESS RELATIONSHIPS</span>
+                  <h2>Flagged process paths</h2>
+                  <p>
+                    Active process lineage is shown only from real process
+                    observations.
+                  </p>
+                </div>
+                <span id="process-graph-count" class="badge neutral">Checking</span>
+              </div>
+              <div id="process-graph-wrap" class="process-graph-wrap">
+                <svg
+                  id="process-graph-svg"
+                  role="img"
+                  aria-label="Live suspicious process relationship graph"
+                  preserveAspectRatio="xMinYMin meet"
+                ></svg>
+                <p id="process-graph-empty" class="empty-state" hidden>
+                  No active suspicious process relationship is currently flagged.
+                </p>
+              </div>
+              <p class="fine-print analyst-only">
+                A highlighted process is an ATT&CK-aligned behavioral indicator.
+                It is not a malware verdict. Select a highlighted node to open
+                its stored evidence.
+              </p>
+            </article>
+
+            <article class="panel">
+              <div class="panel-heading">
+                <div>
+                  <span class="eyebrow">MITRE ATT&CK CONTEXT</span>
+                  <h2>Techniques observed</h2>
+                </div>
+              </div>
+              <div id="mitre-technique-list" class="technique-list"></div>
+              <p id="mitre-technique-empty" class="empty-state" hidden>
+                No MITRE ATT&CK-aligned process alert appears in the current
+                investigation window.
+              </p>
+            </article>
+          </div>
+
+          <article class="panel findings-panel">
+            <div class="panel-heading">
+              <div>
+                <span class="eyebrow">RECENT INVESTIGATION ITEMS</span>
+                <h2>What needs review</h2>
+                <p>
+                  Open an item to see what happened, why CryptoVeil noticed it,
+                  and the recommended next step.
+                </p>
+              </div>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Time</th>
+                    <th scope="col">Finding</th>
+                    <th scope="col">Level</th>
+                    <th scope="col">Context</th>
+                    <th scope="col">Evidence</th>
+                  </tr>
+                </thead>
+                <tbody id="threat-findings-body"></tbody>
+              </table>
+            </div>
+            <p id="threat-findings-empty" class="empty-state" hidden>
+              No investigation findings are present in the latest evidence
+              window.
+            </p>
+          </article>
+        </section>
+
+        <section
+          class="view"
+          id="view-evidence"
+          aria-labelledby="evidence-title"
+          hidden
+        >
+          <div class="page-heading">
+            <div>
+              <span class="eyebrow">PRESERVE & VERIFY</span>
+              <h1 id="evidence-title">Evidence integrity</h1>
+              <p>
+                Check whether the evidence still matches its original signed
+                record.
+              </p>
+            </div>
+            <button class="button primary" id="verify-button">
+              Verify evidence now
+            </button>
+          </div>
+          <div id="evidence-banner" class="banner neutral" role="status"></div>
+          <article class="panel">
+            <div class="panel-heading">
+              <div>
+                <h2>The original and the current evidence</h2>
+                <p>
+                  Matching Merkle roots mean these records match the saved
+                  baseline.
+                </p>
+              </div>
+              <span class="badge neutral" id="root-match">Not checked</span>
+            </div>
+            <div class="hash-grid analyst-only">
+              <div class="hash-card">
+                <span class="eyebrow">ORIGINAL SIGNED BASELINE</span
+                ><code id="original-root">Waiting for verification</code
+                ><small>Preserved when evidence was recorded</small>
+              </div>
+              <div class="hash-card">
+                <span class="eyebrow">RECALCULATED FROM CURRENT FILES</span
+                ><code id="current-root">Waiting for verification</code
+                ><small>Calculated again during verification</small>
+              </div>
+            </div>
+            <dl class="integrity-facts">
+              <div>
+                <dt>Expected records</dt>
+                <dd id="expected-records">—</dd>
+              </div>
+              <div>
+                <dt>Records found</dt>
+                <dd id="found-records">—</dd>
+              </div>
+              <div>
+                <dt>Digital signatures</dt>
+                <dd id="signature-status">—</dd>
+              </div>
+              <div>
+                <dt>Last checked</dt>
+                <dd id="evidence-checked">—</dd>
+              </div>
+            </dl>
+          </article>
+          <article class="panel" id="violations-panel" hidden>
+            <div class="panel-heading">
+              <h2>Changes requiring investigation</h2>
+            </div>
+            <ul class="issue-list" id="violations-list"></ul>
+            <p class="fine-print">
+              Preserve the existing files before investigating. CryptoVeil
+              pauses new collection after an integrity failure.
+            </p>
+          </article>
+          <article class="panel daily-evidence-panel">
+            <div class="panel-heading">
+              <div>
                 <span class="eyebrow">DATE-WISE OFF-HOST EVIDENCE</span>
                 <h2>Evidence by day</h2>
                 <p>
@@ -635,22 +958,7 @@
                 </p>
               </details>
             </article>
-            <article class="panel">
-              <span class="eyebrow">UNDERSTAND THE CHECK</span>
-              <h2>Try a safe demonstration</h2>
-              <p>
-                See how verification reacts when a test record changes, the last
-                record is deleted, or an entire test log is removed.
-              </p>
-              <p class="fine-print">
-                Uses temporary sample data. Your collected evidence is never
-                changed.
-              </p>
-              <button class="button secondary" id="demo-button">
-                Run isolated demo
-              </button>
-              <div id="demo-results" aria-live="polite"></div>
-            </article>
+
           </div>
         </section>
         <section
@@ -708,7 +1016,7 @@
                     <th scope="col">Events</th>
                     <th scope="col">Report files</th>
                     <th scope="col">Evidence when saved</th>
-                    <th scope="col">Download</th>
+                    <th scope="col">Next step</th>
                   </tr>
                 </thead>
                 <tbody id="reports-body"></tbody>
@@ -719,9 +1027,8 @@
             </p>
           </div>
           <p class="fine-print">
-            The PDF summarises activity. Choose the signed ZIP bundle to retain
-            the original evidence, checkpoints and file hashes. A report is
-            checked again before every download.
+            Reports are generated here; evidence verification and all export formats
+            are managed only from the Evidence screen.
           </p>
         </section>
 
