@@ -58,6 +58,14 @@ def pair(client):
     return {"Authorization": f"Bearer {token}", "Origin": EXTENSION}
 
 
+def unlock_exports(client):
+    dashboard(client)
+    passphrase = "cryptoveil-owner-test-passphrase"
+    configured = client.post("/api/export/configure", json={"passphrase": passphrase})
+    assert configured.status_code == 200
+    client.headers["X-CryptoVeil-Vault"] = configured.json()["token"]
+
+
 def telemetry(**changes):
     return {
         "event_id": str(uuid.uuid4()),
@@ -340,8 +348,68 @@ def test_tamper_detected_and_new_ingest_is_not_acknowledged(client):
     assert client.get("/api/forensics/proof/0").status_code == 409
 
 
+def test_raw_forensic_exports_require_owner_unlock_and_are_audited(client):
+    headers = pair(client)
+    assert client.post("/api/browser/telemetry", json=telemetry(), headers=headers).status_code == 200
+    generated = client.post("/api/reports/generate", json={})
+    assert generated.status_code == 200
+    date = generated.json()["date"]
+    endpoint = f"/api/evidence/daily/{date}/download?format=zip"
+
+    assert client.get(endpoint).status_code == 403
+    assert client.get(f"/api/reports/{date}/download?format=pdf").status_code == 403
+    assert client.get(f"/api/reports/{date}").status_code == 403
+    assert client.get("/api/forensics/archive/0").status_code == 403
+    assert client.get("/api/export/access").json()["configured"] is False
+    assert client.post("/api/export/configure", json={"passphrase": "short"}).status_code == 409
+
+    secret = "strong-local-owner-passphrase"
+    enrollment = client.post("/api/export/configure", json={"passphrase": secret})
+    assert enrollment.status_code == 200
+    assert client.post("/api/export/configure", json={"passphrase": secret}).status_code == 409
+    assert client.get(endpoint).status_code == 403
+
+    with_token = {"X-CryptoVeil-Vault": enrollment.json()["token"]}
+    response = client.get(endpoint, headers=with_token)
+    assert response.status_code == 200
+    audit = client.app.state.audit_logger
+    exported = [
+        entry for entry in audit.recent_entries(100)
+        if entry["event"].get("topic") == "security.evidence.exported"
+    ]
+    assert len(exported) == 1
+    assert exported[0]["event"]["format"] == "zip"
+    assert exported[0]["event"]["date"] == date
+    assert exported[0]["event"]["byte_count"] == len(response.content)
+    assert audit.verify_chain()["verified"]
+
+    client.post("/api/export/lock", json={})
+    assert client.get(endpoint, headers=with_token).status_code == 403
+    assert client.post("/api/export/unlock", json={"passphrase": "incorrect"}).status_code == 403
+    unlocked = client.post("/api/export/unlock", json={"passphrase": secret})
+    assert unlocked.status_code == 200
+    assert client.get(endpoint, headers={"X-CryptoVeil-Vault": unlocked.json()["token"]}).status_code == 200
+
+
+def test_export_authorization_expires_and_rejects_brute_force(client):
+    dashboard(client)
+    secret = "sixteen-characters-are-not-a-suggestion"
+    configured = client.post("/api/export/configure", json={"passphrase": secret})
+    token = configured.json()["token"]
+    vault = client.app.state.export_vault
+    assert vault.authorized(token)
+    vault._expiry = 0
+    assert not vault.authorized(token)
+    for _ in range(5):
+        assert client.post("/api/export/unlock", json={"passphrase": "wrong"}).status_code == 403
+    limited = client.post("/api/export/unlock", json={"passphrase": secret})
+    assert limited.status_code == 403
+    assert "Wait one minute" in limited.json()["detail"]
+
+
 def test_date_wise_evidence_api_lists_verifies_and_downloads(client):
     headers = pair(client)
+    unlock_exports(client)
     client.post("/api/browser/telemetry", json=telemetry(), headers=headers)
     generated = client.post("/api/reports/generate", json={})
     assert generated.status_code == 200
@@ -446,6 +514,7 @@ def test_daily_seals_link_consecutive_days_and_fail_closed_on_tamper(client):
 
 def test_report_exports_are_saved_signed_and_tamper_checked(client):
     headers = pair(client)
+    unlock_exports(client)
     client.post("/api/browser/telemetry", json=telemetry(), headers=headers)
     generated = client.post("/api/reports/generate", json={})
     assert generated.status_code == 200
@@ -504,6 +573,7 @@ def test_malformed_report_manifest_fails_without_crashing(client, payload):
 
 def test_download_serves_only_the_bytes_it_verified(client, monkeypatch):
     pair(client)
+    unlock_exports(client)
     generated = client.post("/api/reports/generate", json={}).json()
     store = client.app.state.report_store
     target = store.directory / generated["date"] / generated["version"] / "report.csv"
