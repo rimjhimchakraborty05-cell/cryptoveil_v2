@@ -209,8 +209,6 @@ function renderFirstRun(data, connected, integrity) {
     completeCount === 3 ? "good" : completeCount ? "warn" : "neutral",
   );
   $("first-run-card").hidden = completeCount === 3;
-  $("setup-connect-browser").hidden = browserReady;
-  $("setup-open-lab").hidden = !appReady || monitoringReady;
 }
 
 function renderProtectionStatus(data, connected, integrity) {
@@ -1422,8 +1420,6 @@ function openConnectDialog() {
   $("connect-dialog").showModal();
 }
 $("connect-button").addEventListener("click", openConnectDialog);
-$("setup-connect-browser").addEventListener("click", openConnectDialog);
-$("setup-open-lab").addEventListener("click", () => selectView("lab"));
 $("pair-code-button").addEventListener("click", (event) =>
   action(
     event.currentTarget,
