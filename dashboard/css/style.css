@@ -1497,3 +1497,42 @@ body[data-mode="simple"] .threat-metrics .metric small {
     grid-template-columns: 1fr;
   }
 }
+
+/* Single-purpose forensic export gateway. Normal dashboard remains uncluttered. */
+#export-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: 88vh;
+  overflow: auto;
+}
+#export-dialog form,
+#vault-export-options {
+  display: grid;
+  gap: 12px;
+  margin-top: 15px;
+}
+#export-dialog label {
+  display: block;
+  font-size: 12px;
+  font-weight: 650;
+}
+#export-dialog input,
+#export-dialog select {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 12px;
+  color: var(--ink);
+  background: var(--panel);
+}
+#vault-export-status:not(:empty) {
+  margin-top: 15px;
+}
+.daily-evidence-panel .text-button {
+  white-space: nowrap;
+}
+@media (max-width: 760px) {
+  .mode-switch {
+    display: inline-flex;
+  }
+}
