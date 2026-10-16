@@ -49,3 +49,23 @@ def test_dashboard_javascript_references_only_existing_elements():
     referenced = set(re.findall(r'\$\("([^"]+)"\)', source))
     missing = referenced - set(parser.ids)
     assert not missing, f"Dashboard script references nonexistent controls: {sorted(missing)}"
+
+
+def test_export_passphrase_survives_restart_without_storing_plaintext(tmp_path):
+    from agent.server.export_vault import EvidenceExportVault
+
+    secret = "strong-cryptoveil-owner-secret"
+    first = EvidenceExportVault(tmp_path)
+    first_token = first.configure(secret)["token"]
+    assert first.authorized(first_token)
+    saved = first.path.read_text(encoding="utf-8")
+    assert secret not in saved
+    assert "scrypt-v1" in saved
+
+    second = EvidenceExportVault(tmp_path)
+    assert second.configured
+    assert not second.authorized(first_token)
+    token = second.unlock(secret)["token"]
+    assert second.authorized(token)
+    second.lock()
+    assert not second.authorized(token)
