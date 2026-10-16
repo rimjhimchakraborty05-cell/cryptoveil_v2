@@ -243,7 +243,7 @@ function renderProtectionStatus(data, connected, integrity) {
 
   setBadge(
     "protect-shadow",
-    connected.length ? "Monitoring" : "Not connected",
+    connected.length ? "Extension online" : "Not connected",
     connected.length ? "good" : "neutral",
   );
 
@@ -1280,44 +1280,14 @@ async function loadReports() {
             : "neutral",
       ),
     );
-    const download = node("td"),
-      button = node("button", "text-button", "Download ↓");
-    button.disabled = !report.verified;
-    button.setAttribute("aria-label", `Download report for ${report.date}`);
-    button.addEventListener("click", () =>
-      action(button, () => downloadReport(report.date)),
-    );
-    download.append(button);
     row.append(
       day,
       node("td", "", number(report.event_count)),
       files,
       evidence,
-      download,
     );
     tbody.append(row);
   }
-}
-async function downloadReport(date) {
-  const format = $("report-format").value,
-    res = await fetch(`/api/reports/${date}/download?format=${format}`, {
-      cache: "no-store",
-    });
-  if (!res.ok) {
-    let data = {};
-    try {
-      data = await res.json();
-    } catch {}
-    throw new Error(errorText(data));
-  }
-  const url = URL.createObjectURL(await res.blob()),
-    a = node("a");
-  a.href = url;
-  a.download = `cryptoveil_${date}.${format}`;
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 async function poll() {
   if (state.polling) return;
@@ -1326,6 +1296,8 @@ async function poll() {
     await refreshStatus();
     if (state.view === "activity") await loadActivity();
     if (state.view === "threats") await loadInvestigation();
+    if (state.view === "evidence") await loadDailyEvidence();
+    if (state.view === "reports") await loadReports();
   } catch (e) {
     $("app-status").textContent = "Application unavailable";
     $("app-dot").classList.remove("online");
@@ -1498,24 +1470,6 @@ $("refresh-daily-evidence").addEventListener("click", (event) =>
   action(event.currentTarget, () => loadDailyEvidence()),
 );
 
-$("demo-button").addEventListener("click", (event) =>
-  action(event.currentTarget, async () => {
-    const data = await api("/api/forensics/demo", {});
-    $("demo-results").replaceChildren(
-      ...data.checks.map((check, index) => {
-        const row = node("div", "demo-row");
-        row.append(
-          node("span", "", check.scenario),
-          badge(
-            check.verified ? "Verified" : "Change detected",
-            check.verified ? "good" : "bad",
-          ),
-        );
-        return row;
-      }),
-    );
-  }),
-);
 $("mode-simple").addEventListener("click", () => applyMode("simple"));
 $("mode-analyst").addEventListener("click", () => applyMode("analyst"));
 
