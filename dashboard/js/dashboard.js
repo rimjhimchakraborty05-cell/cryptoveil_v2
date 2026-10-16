@@ -167,8 +167,8 @@ function renderFirstRun(data, connected, integrity) {
   const browserReady = connected.length > 0;
   const monitoringReady =
     data.sensors_enabled &&
-    monitored.length > 0 &&
-    acceptable.length === monitored.length &&
+    monitored.length === 4 &&
+    acceptable.length === 4 &&
     integrity.verified;
 
   setSetupStep(
@@ -228,7 +228,7 @@ function renderProtectionStatus(data, connected, integrity) {
   const endpointText =
     !data.sensors_enabled
       ? "Disabled"
-      : deviceSensors.length && activeDeviceSensors.length === deviceSensors.length
+      : deviceSensors.length === 4 && activeDeviceSensors.length === 4
         ? "Active"
         : activeDeviceSensors.length
           ? "Limited"
