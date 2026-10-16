@@ -1016,8 +1016,7 @@
                     <th scope="col">Events</th>
                     <th scope="col">Report files</th>
                     <th scope="col">Evidence when saved</th>
-                    <th scope="col">Next step</th>
-                  </tr>
+                                       </tr>
                 </thead>
                 <tbody id="reports-body"></tbody>
               </table>
@@ -1174,6 +1173,53 @@
         ><span id="last-updated"></span>
       </footer>
     </div>
+    <dialog id="export-dialog" aria-labelledby="export-title">
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow">CONTROLLED FORENSIC EXPORT</span>
+          <h2 id="export-title">Evidence access</h2>
+        </div>
+        <button class="icon-button" data-close="export-dialog" aria-label="Close evidence export">×</button>
+      </div>
+      <p id="export-date-label" class="fine-print"></p>
+      <p class="fine-print">
+        Evidence verification is available without exporting. Complete evidence
+        downloads require an owner passphrase and a short-lived authorization.
+        Each successful export is recorded in the tamper-evident evidence ledger.
+      </p>
+      <form id="export-auth-form">
+        <label id="vault-passphrase-label" for="vault-passphrase">Owner passphrase</label>
+        <input id="vault-passphrase" type="password" autocomplete="off"
+          minlength="1" maxlength="128" required />
+        <div id="vault-confirm-wrap" hidden>
+          <label for="vault-confirm">Repeat new owner passphrase</label>
+          <input id="vault-confirm" type="password" autocomplete="new-password" maxlength="128" />
+        </div>
+        <p id="vault-setup-note" class="fine-print" hidden>
+          Create a 16-character or longer passphrase. It protects the export
+          gateway; remember it, because CryptoVeil will not silently reset it.
+          This is local owner authorization, not enterprise multi-user RBAC.
+        </p>
+        <button class="button primary" id="vault-authorize" type="submit">Unlock exports</button>
+      </form>
+      <section id="vault-export-options" hidden>
+        <label for="vault-export-format">Export format</label>
+        <select id="vault-export-format">
+          <option value="pdf">PDF security summary</option>
+          <option value="metadata">Signed hashes and verification metadata</option>
+          <option value="events">JSON event evidence</option>
+          <option value="zip">Complete evidence bundle (ZIP)</option>
+        </select>
+        <p class="fine-print">
+          Files downloaded to your computer are not encrypted by this export
+          gateway. Store complete evidence only in a trusted location.
+        </p>
+        <button class="button primary" id="vault-download">Download authorized evidence</button>
+        <button class="button secondary" id="vault-lock">Lock exports</button>
+      </section>
+      <p id="vault-export-status" role="status" class="fine-print"></p>
+    </dialog>
+
     <dialog id="connect-dialog" aria-labelledby="connect-title">
       <div class="dialog-heading">
         <div>
